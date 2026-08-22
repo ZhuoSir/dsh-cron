@@ -69,12 +69,12 @@ console.log('✓ history records delivered')
 
 // --- history correlation: message enters surface -> running; assistant text -> excerpt; turn end -> completed
 const onceMsg = run1.fired.find((m) => m.content[0].text.includes('"once"'))
-run1.emit('session/event', run1.mockSession, { type: 'user/message', id: onceMsg.id, role: 'user', content: onceMsg.content })
+run1.emit('session/event', run1.mockSession, { type: 'user/message', seq: 1, time: Date.now(), data: { ...onceMsg } })
 run1.emit('session/event', run1.mockSession, {
-  type: 'assistant/message', turn: 1, step: 1,
-  message: { role: 'assistant', content: [{ type: 'text', text: '晨报已生成：今日待办 5 项。' }] },
+  type: 'assistant/message', seq: 2, time: Date.now(),
+  data: { turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: '晨报已生成：今日待办 5 项。' }] } },
 })
-run1.emit('session/event', run1.mockSession, { type: 'turn/end', turn: 1, reason: { kind: 'completed' } })
+run1.emit('session/event', run1.mockSession, { type: 'turn/end', seq: 3, time: Date.now(), data: { turn: 1, reason: { kind: 'completed' } } })
 records = JSON.parse(await run1.tools.get('cron_history').execute({ limit: 10 }, {}))
 const onceRecord = records.find((r) => r.taskId === 'once')
 assert.equal(onceRecord.status, 'completed', 'turn end completes record')
@@ -86,8 +86,8 @@ console.log('✓ history correlation (running -> excerpt -> completed)')
 
 // failed turn
 const morningMsg = run1.fired.find((m) => m.content[0].text.includes('"morning"'))
-run1.emit('session/event', run1.mockSession, { type: 'user/message', id: morningMsg.id, role: 'user', content: morningMsg.content })
-run1.emit('session/event', run1.mockSession, { type: 'turn/end', turn: 2, reason: { kind: 'error', error: { message: 'boom' } } })
+run1.emit('session/event', run1.mockSession, { type: 'user/message', seq: 4, time: Date.now(), data: { ...morningMsg } })
+run1.emit('session/event', run1.mockSession, { type: 'turn/end', seq: 5, time: Date.now(), data: { turn: 2, reason: { kind: 'error', error: { message: 'boom' } } } })
 records = JSON.parse(await run1.tools.get('cron_history').execute({ limit: 10 }, {}))
 const morningRecord = records.find((r) => r.taskId === 'morning')
 assert.equal(morningRecord.status, 'failed')
@@ -121,13 +121,13 @@ run2.disposers.forEach((d) => d?.())
 const run3 = makeCtx(storagePath, historyPath, configTasks)
 // malformed session events must be swallowed by the guarded listener
 run3.emit('session/event', run3.mockSession, null)
-run3.emit('session/event', run3.mockSession, { type: 'assistant/message', message: null })
-run3.emit('session/event', run3.mockSession, { type: 'turn/end', reason: null })
+run3.emit('session/event', run3.mockSession, { type: 'assistant/message', seq: 1, time: 0, data: null })
+run3.emit('session/event', run3.mockSession, { type: 'turn/end', seq: 2, time: 0, data: { turn: 1, reason: null } })
 run3.emit('agent/status', null)
 run3.emit('agent/created', {})
 // a throwing followup must not propagate out of a tick
 run3.mockAgent.followup = () => { throw new Error('agent exploded') }
-run3.emit('session/event', run3.mockSession, { type: 'user/message', id: 'x' })
+run3.emit('session/event', run3.mockSession, { type: 'user/message', seq: 3, time: 0, data: { id: 'x' } })
 await new Promise((r) => setTimeout(r, 4200)) // hourly task is NOT due; force via every-60? wait: hourly due after 60s — no fire expected
 run3.disposers.forEach((d) => d?.())
 console.log('✓ fault containment (malformed events, throwing followup)')

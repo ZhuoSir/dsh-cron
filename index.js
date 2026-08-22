@@ -557,8 +557,11 @@ export function apply(ctx, config) {
 
   ctx.on('session/event', guarded('session/event listener', (session, event) => {
     if (pendingRuns.size === 0) return
+    // SessionEvent is an envelope: { type, seq, time, data } — the payload
+    // (the message, the turn reason, …) lives under `data`.
+    const data = event?.data ?? {}
     if (event.type === 'user/message') {
-      const run = pendingRuns.get(event.id)
+      const run = pendingRuns.get(data.id)
       if (run && !run.seen) {
         run.seen = true
         updateHistory(run.recordId, { status: 'running', startedAt: Date.now() })
@@ -566,7 +569,7 @@ export function apply(ctx, config) {
       return
     }
     if (event.type === 'assistant/message') {
-      const text = messageText(event.message)
+      const text = messageText(data.message)
       if (!text) return
       for (const run of pendingRuns.values()) {
         if (run.seen && run.session === session) {
@@ -576,7 +579,7 @@ export function apply(ctx, config) {
       return
     }
     if (event.type === 'turn/end') {
-      const reason = event.reason
+      const reason = data.reason
       const kind = typeof reason?.kind === 'string' ? reason.kind : 'unknown'
       for (const [messageId, run] of pendingRuns) {
         if (!run.seen || run.session !== session) continue
