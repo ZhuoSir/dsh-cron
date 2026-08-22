@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="560" viewBox="0 0 760 560" font-family="-apple-system, 'PingFang SC', 'Segoe UI', sans-serif">
+  <!-- Schematic of the dsh-cron drawer UI (示意图，非真实截图) -->
+  <rect width="760" height="560" fill="#f5f5f6"/>
+  <!-- dimmed conversation behind the mask -->
+  <rect x="0" y="0" width="760" height="48" fill="#ffffff" stroke="#e4e4e7"/>
+  <text x="20" y="29" font-size="13" fill="#71717a">我的工作会话</text>
+  <rect x="560" y="12" width="70" height="24" rx="6" fill="#f4f4f5"/>
+  <text x="572" y="28" font-size="12" fill="#52525b">🕐 定时任务 2</text>
+  <rect x="640" y="12" width="60" height="24" rx="6" fill="#f4f4f5"/>
+  <text x="652" y="28" font-size="12" fill="#52525b">会话日志</text>
+  <rect x="0" y="48" width="362" height="512" fill="#000000" opacity="0.18"/>
+  <!-- drawer -->
+  <rect x="362" y="0" width="398" height="560" fill="#ffffff" stroke="#e4e4e7"/>
+  <text x="382" y="30" font-size="13" font-weight="600" fill="#18181b">定时任务</text>
+  <rect x="712" y="12" width="28" height="24" rx="6" fill="none"/>
+  <text x="720" y="29" font-size="15" fill="#71717a">×</text>
+  <!-- tabs -->
+  <rect x="374" y="46" width="184" height="28" rx="6" fill="#f4f4f5"/>
+  <text x="452" y="64" font-size="12" fill="#18181b" text-anchor="middle">任务</text>
+  <rect x="562" y="46" width="184" height="28" rx="6" fill="none"/>
+  <text x="654" y="64" font-size="12" fill="#71717a" text-anchor="middle">执行记录</text>
+  <!-- task row 1 -->
+  <rect x="374" y="86" width="372" height="86" rx="8" fill="#fafafa"/>
+  <circle cx="388" cy="102" r="3.5" fill="#22c55e"/>
+  <text x="400" y="106" font-size="12" fill="#18181b" font-family="ui-monospace, monospace">morning-briefing</text>
+  <rect x="560" y="94" width="52" height="16" rx="4" fill="#f4f4f5"/>
+  <text x="586" y="105" font-size="9" fill="#71717a" text-anchor="middle">绑定会话</text>
+  <rect x="618" y="94" width="34" height="16" rx="4" fill="#f4f4f5"/>
+  <text x="635" y="105" font-size="9" fill="#71717a" text-anchor="middle">动态</text>
+  <text x="388" y="128" font-size="12" fill="#52525b">总结今天的待办事项，给我一份晨报</text>
+  <text x="388" y="148" font-size="11" fill="#a1a1aa">每天 09:00</text>
+  <text x="620" y="148" font-size="11" fill="#a1a1aa">下次: 明天 09:00</text>
+  <text x="388" y="166" font-size="11" fill="#2563eb">立即执行</text>
+  <text x="440" y="166" font-size="11" fill="#2563eb">暂停</text>
+  <text x="476" y="166" font-size="11" fill="#2563eb">编辑</text>
+  <text x="508" y="166" font-size="11" fill="#ef4444">删除</text>
+  <!-- task row 2 -->
+  <rect x="374" y="182" width="372" height="86" rx="8" fill="#fafafa"/>
+  <circle cx="388" cy="198" r="3.5" fill="#22c55e"/>
+  <text x="400" y="202" font-size="12" fill="#18181b" font-family="ui-monospace, monospace">check-build</text>
+  <rect x="618" y="190" width="34" height="16" rx="4" fill="#f4f4f5"/>
+  <text x="635" y="201" font-size="9" fill="#71717a" text-anchor="middle">配置</text>
+  <text x="388" y="224" font-size="12" fill="#52525b">检查工作区的构建状态，失败就修复</text>
+  <text x="388" y="244" font-size="11" fill="#a1a1aa">cron: */30 9-18 * * 1-5</text>
+  <text x="620" y="244" font-size="11" fill="#a1a1aa">下次: 14:30</text>
+  <text x="388" y="262" font-size="11" fill="#2563eb">立即执行</text>
+  <text x="440" y="262" font-size="11" fill="#2563eb">暂停</text>
+  <!-- history hint -->
+  <rect x="374" y="286" width="372" height="64" rx="8" fill="#fafafa"/>
+  <circle cx="388" cy="302" r="3.5" fill="#22c55e"/>
+  <text x="400" y="306" font-size="12" fill="#18181b" font-family="ui-monospace, monospace">morning-briefing</text>
+  <rect x="560" y="294" width="40" height="16" rx="4" fill="#f4f4f5"/>
+  <text x="580" y="305" font-size="9" fill="#71717a" text-anchor="middle">已完成</text>
+  <text x="660" y="305" font-size="11" fill="#a1a1aa">今天 09:00</text>
+  <text x="388" y="326" font-size="12" fill="#52525b">今日待办共 5 项：1. 回复邮件…</text>
+  <text x="388" y="344" font-size="11" fill="#a1a1aa">计划: 今天 09:00 · 耗时 2分13秒</text>
+  <text x="382" y="540" font-size="10" fill="#a1a1aa">示意图（schematic），以实际 UI 为准</text>
+</svg>

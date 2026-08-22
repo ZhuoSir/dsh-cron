@@ -1,41 +1,66 @@
 # dsh-cron
 
-定时任务插件：让 DeepSeek Harness 在指定时间自动把任务提示注入当前会话，Agent 被唤醒后自动执行。自带 Web 管理面板（任务列表 + 执行记录）。
+> 定时任务插件：让 DeepSeek Harness 在指定时间自动执行任务——到点把任务提示注入会话，Agent 被唤醒后自动执行并在会话中回复结果。自带 Web 管理抽屉（任务列表 + 执行记录）。
 
-## 调度规则（每个任务四选一）
+![许可证](https://img.shields.io/badge/license-MIT-blue) ![DSH](https://img.shields.io/badge/dsh-%3E%3D0.1.0--rc.6-blueviolet) ![Node](https://img.shields.io/badge/node-%3E%3D22-green)
+
+**English summary**: Scheduled tasks for DeepSeek Harness. Create tasks in chat with natural language ("every Monday 9am remind me…"), the agent converts them to `at` / `every` / `daily` / 5-field `cron` rules, fires them back into the session that created them, and replies with results in conversation. Ships a right-side drawer in the Web UI (task list + run history). MIT licensed, no install scripts, no network calls.
+
+## 截图
+
+![定时任务抽屉](docs/screenshot-drawer.svg)
+
+> 上图为**示意图**（schematic），忠实反映实际 UI 结构：会话头部右侧的「🕐 定时任务」按钮 + 右侧滑出抽屉（任务 / 执行记录两个 Tab）。欢迎替换为真实截图（`docs/` 目录，PNG 亦可）。
+
+## 安装
+
+**从 GitHub 安装（推荐，锁定 tag 或 commit 更安全）**：
+
+```sh
+dsh plugin --profile web add github:ZhuoSir/dsh-cron
+# 或锁定版本：
+dsh plugin --profile web add github:ZhuoSir/dsh-cron#v0.2.0
+```
+
+**本地 / tarball 安装**：
+
+```sh
+dsh plugin --profile web add ./dsh-cron            # 本地目录（开发用 link）
+dsh plugin --profile web add ./dsh-cron-0.2.0.tgz  # pnpm pack 产物
+```
+
+**验证与卸载**：
+
+```sh
+dsh --profile web --dump-config   # 应能看到 "# == dsh-cron" 配置层
+dsh plugin --profile web remove dsh-cron
+```
+
+安装后**重启 `dsh web` 并硬刷新浏览器**（Cmd/Ctrl+Shift+R）。仓库已提交 client 半构建产物（`lib/client.js`），因此 GitHub 安装**不需要任何构建授权**（无 `prepare` 脚本，pnpm ≥10 的 `allowBuilds` 授权与此插件无关）。
+
+## 支持的 profile
+
+| Profile | 支持情况 |
+|---|---|
+| **web**（`dsh web`） | ✅ 完整功能：调度 + 工具 + 管理抽屉 + 执行记录 |
+| **headless**（`dsh` 一次性运行） | ✅ 调度 + 模型工具完整可用；❌ 无 Web 面板（无 webServer，属预期） |
+
+HTTP API 通过可选注入挂载（`ctx.inject(['webServer','webRuntime'])`），没有 Web 栈的环境不会报错，只是没有面板。
+
+## 用法
+
+**在对话中直接说**（推荐）：「每周一早上 9 点提醒我交周报」「每半小时检查一次构建」——Agent 会把自然语言转成调度规则并自动创建任务。到点后任务回到**创建它的会话**执行，结果直接在会话中回复。
+
+**调度规则**（每个任务四选一）：
 
 | 字段 | 含义 | 示例 |
 |---|---|---|
 | `at` | 一次性，ISO 8601 时间 | `"2026-08-23T09:00:00+08:00"` |
-| `every` | 固定间隔（秒，最小 60） | `3600` |
+| `every` | 固定间隔（秒，最小 10） | `3600` |
 | `daily` | 每天本地时间 `HH:MM` | `"09:30"` |
 | `cron` | 标准 5 段 cron 表达式（分 时 日 月 周，本地时间） | `"0 9 * * 1"` = 每周一 09:00 |
 
-## 安装
-
-```sh
-dsh plugin --profile <profile> add ./dsh-cron
-# 重启 dsh web 后生效（host 半改动需要重启；client 半改动硬刷新浏览器即可）
-```
-
-## 用法
-
-**在对话中直接说**（推荐）：「每周一早上 9 点提醒我交周报」「每半小时检查一次构建」——Agent 会自动把自然语言转成调度规则并调用 `cron_add` 创建任务。到点后任务提示注入会话，**执行结果直接在会话中回复**。
-
-**会话绑定**：任务创建时自动绑定当前会话，触发时回到**创建它的那个窗口**执行回复——不会跑到你当前打开的窗口里。绑定会话被关闭后才回退到活跃会话（并记日志）。面板中绑定任务显示「绑定会话」徽标；config 任务也可以用 `sessionId` 字段显式绑定。
-
-## Web 面板
-
-会话头部右侧出现 ⏰ 按钮（带启用中的任务数），点击从右侧滑出抽屉：
-
-- **任务 Tab**：查看所有任务（规则、下次触发、来源、状态）；动态任务支持 **编辑 / 立即执行 / 暂停 / 删除**，config 声明的任务可暂停/恢复
-- **执行记录 Tab**：每次触发一条记录——投递时间、执行状态（已投递/执行中/已完成/失败）、耗时、Agent 回复摘要
-
-面板数据通过 host 半注册的 `POST /cron/api/<method>` 读写（带 loopback/trustedHosts 信任围栏）。
-
-## 配置（可选）
-
-在 profile 的 `cordis.patch.yml` 中声明静态任务：
+**也可以在配置中静态声明**（`~/.dsh/profiles/web/cordis.patch.yml`）：
 
 ```yaml
 - insert:
@@ -47,37 +72,59 @@ dsh plugin --profile <profile> add ./dsh-cron
           - id: morning-briefing
             prompt: '总结今天的待办事项，给我一份晨报'
             daily: '09:00'
-          - id: check-build
-            prompt: '检查工作区的构建状态，失败就修复'
-            every: 1800
 ```
 
-## 运行时管理（模型工具）
+**模型工具**：`cron_list` / `cron_add` / `cron_update` / `cron_remove` / `cron_history`，Agent 在对话中可直接管理任务。
 
-插件注册五个工具，Agent 在对话中用它们管理任务：
+## 权限说明
 
-- `cron_list` — 列出所有任务及下次触发时间
-- `cron_add` — 新增任务（支持 cron 表达式；持久化，重启不丢）
-- `cron_update` — 编辑动态任务的内容/规则
-- `cron_remove` — 删除动态任务（config 声明的任务需在 cordis.yml 中移除）
-- `cron_history` — 查看最近的执行记录
+安装和使用本插件意味着授予以下能力，请据此评估：
+
+| 能力 | 说明 | 风险面 |
+|---|---|---|
+| **驱动 Agent 自动执行** | 触发时向会话注入 `source: plugin` 的用户消息（`agent.followup`），Agent 将其作为普通一轮对话执行 | ⚠️ **每次触发都是真实模型调用，消耗 token**；任务质量取决于你的 prompt；Agent 拥有的工具权限（如 bash）在任务执行时同样生效 |
+| **本地文件读写** | 仅两个文件：`$DSH_HOME/cron-tasks.json`（任务）和 `$DSH_HOME/cron-history.jsonl`（执行记录，500 条封顶），均可用配置覆盖路径 | 低；原子写入（tmp + rename），不读写其他位置 |
+| **HTTP API** | `POST /cron/api/*`，仅接受 loopback 或 `trustedHosts` 来源（Host 头校验 + 拒绝 `sec-fetch-site: cross-site`），防 DNS 重绑定/跨站调用 | 低；仅本机页面可访问 |
+| **网络访问** | ❌ 插件自身不发起任何网络请求 | 无 |
+| **安装脚本** | ❌ 无 `prepare`/`postinstall` 等任何安装期脚本 | 无（GitHub 安装不需要构建授权） |
+| **Shell / 系统命令** | ❌ 不调用 | 无 |
+
+可靠性设计：任务运行记录持久化（重启不重发）、`daily` 错过补发一次、所有回调入口有防崩溃包裹（插件故障不会拖垮宿主进程）、会话绑定失效自动回退并记日志。
+
+## 兼容性
+
+| 项目 | 要求 |
+|---|---|
+| DeepSeek Harness | `>= 0.1.0-rc.6`（在 `0.1.0-rc.7` / `rc.8` 上实测） |
+| Node.js | `>= 22`（跟随 DSH 的运行要求） |
+| 平台 | macOS 已实测；Linux / Windows 预期可用（纯 Node + 本地时区，无平台 API 依赖），未实测 |
+| 浏览器 | 跟随 DSH Web 壳（现代浏览器，React 18 运行时由壳提供） |
+| pnpm | 仅开发构建需要 `>= 10`；**安装使用不需要** |
+
+与其他插件共存：无已知冲突；会话头部使用 `order: -50` 与 dsh-session-manager 的按钮（-40/-30/-10）相邻。
 
 ## 工作原理
 
-- 触发时通过 `agent.followup()` 向最近活跃的 root agent 注入一条 `source: plugin` 的用户消息，Agent 将其作为普通一轮对话执行；Agent 忙时任务排队，不会并发重叠。
+- 触发时通过 `agent.followup()` 向任务绑定的会话注入一条 `source: plugin` 的用户消息，Agent 将其作为普通一轮对话执行；Agent 忙时任务排队，不会并发重叠。
 - 消息带有 `[cron]` 框架，明确告知模型这是自动化任务而非用户输入。
 - **执行记录关联**：注入的消息 id 与会话事件流（`session/event`）精确匹配——消息进入会话 → `running`，assistant 回复 → 截取摘要，`turn/end` → 按结束原因记 `completed`/`failed`。
 - 运行记录（`lastRunAt`/`firedAt`）、启停覆盖、执行历史均持久化，重启后不会重复触发已消费的时段；`daily` 任务错过当天时段会补发一次。
-- 任务存储默认 `$DSH_HOME/cron-tasks.json`（`storagePath` 可覆盖）；执行历史默认 `$DSH_HOME/cron-history.jsonl`（`historyPath` 可覆盖，保留最近 500 条）。
-- HTTP API 通过可选注入（`ctx.inject(['webServer', 'webRuntime'])`）挂载：headless 环境没有 web 服务时，调度功能完整保留，只是没有面板。
 
 ## 开发
 
 ```sh
 pnpm install
-pnpm build        # 产出 lib/client.js（__ModuleLoader__ 格式）
+pnpm build        # 产出 lib/client.js（__ModuleLoader__ 格式；改 client 半后必须重新提交该产物）
 pnpm typecheck
 pnpm test         # host 半 mock 测试 + client bundle 验证
 ```
 
-**结构**：单 npm 包、host/client 双半——host（`index.js`）：调度器 + 工具 + `/cron/api` 路由 + 历史采集；client（`src/client/` → `lib/client.js`）：会话头部面板。
+**结构**：单 npm 包、host/client 双半——host（`index.js`）：调度器 + 工具 + `/cron/api` 路由 + 历史采集；client（`src/client/` → `lib/client.js`）：会话头部按钮 + 右侧抽屉。
+
+## 许可证
+
+[MIT](LICENSE) © 2026 dsh-cron contributors
+
+---
+
+**反馈与问题**：[GitHub Issues](https://github.com/ZhuoSir/dsh-cron/issues)
