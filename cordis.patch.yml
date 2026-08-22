@@ -1,0 +1,23 @@
+# The dsh-cron bundle patch: one insert row carrying the whole plugin config.
+# Users override this row (by id) in their profile cordis.patch.yml; a patch
+# replaces the row's whole config, so restate every key you keep.
+- insert:
+    - id: dsh-cron
+      name: dsh-cron
+      config:
+        # Where dynamically added tasks and run stamps are persisted.
+        # Empty means $DSH_HOME/cron-tasks.json.
+        storagePath: ''
+        # Where execution history (one JSON record per line) is persisted.
+        # Empty means $DSH_HOME/cron-history.jsonl.
+        historyPath: ''
+        # Scheduler wake interval in seconds. Lower bounds how late a due
+        # task can fire; 15s is a good default.
+        tickSeconds: 15
+        # Static tasks declared in config. Dynamic tasks created through the
+        # cron_add tool live in the storage file instead.
+        # Each task: { id, prompt, at? | every? | daily?, enabled? }
+        #   at:    ISO 8601 instant, fires once        ("2026-08-23T09:00:00+08:00")
+        #   every: fixed interval in seconds, min 60   (3600)
+        #   daily: local wall-clock "HH:MM", fires daily ("09:30")
+        tasks: []
