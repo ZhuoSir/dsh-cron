@@ -3,7 +3,7 @@
 // under the header gets clipped by the header's stacking context, a fixed
 // drawer does not. The panel talks to the host half over POST /cron/api/<method>.
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { zh, en } from './locale.js'
 import { css, styles } from './styles.js'
 
@@ -13,14 +13,20 @@ export const inject = ['slots', 'locale']
 // --- shared drawer store -----------------------------------------------------
 //
 // The trigger (session-header slot) and the drawer (shell.overlay slot) live
-// in different render trees, so open-state and the enabled-task count travel
-// through this tiny module-level store.
+// in different render trees, so open-state, the enabled-task count, the
+// unread-activity badge, and the selected tab travel through this tiny
+// module-level store.
+
+type DrawerTab = 'tasks' | 'history'
 
 let drawerOpen = false
 let enabledCount = 0
+let unreadCount = 0
+let drawerTab: DrawerTab = 'tasks'
 // useSyncExternalStore requires a cached snapshot: returning a fresh object
 // from getSnapshot causes an infinite render loop.
-let snapshot = { open: drawerOpen, count: enabledCount }
+interface DrawerSnapshot { open: boolean; count: number; unread: number; tab: DrawerTab }
+let snapshot: DrawerSnapshot = { open: drawerOpen, count: enabledCount, unread: unreadCount, tab: drawerTab }
 const storeListeners = new Set<() => void>()
 
 function storeSubscribe(listener: () => void) {
@@ -29,19 +35,39 @@ function storeSubscribe(listener: () => void) {
 }
 
 function storeNotify() {
-  snapshot = { open: drawerOpen, count: enabledCount }
+  snapshot = { open: drawerOpen, count: enabledCount, unread: unreadCount, tab: drawerTab }
   for (const listener of storeListeners) listener()
 }
 
 function setDrawerOpen(open: boolean) {
   if (drawerOpen === open) return
   drawerOpen = open
+  if (open) unreadCount = 0 // opening the drawer acknowledges the badge
   storeNotify()
+}
+
+/** Open the drawer on a specific tab (e.g. a toast click opens history). */
+function openDrawer(tab: DrawerTab) {
+  drawerTab = tab
+  setDrawerOpen(true)
 }
 
 function setEnabledCount(count: number) {
   if (enabledCount === count) return
   enabledCount = count
+  storeNotify()
+}
+
+/** New finished-run activity: bump the badge only while the drawer is closed. */
+function bumpUnread(by: number) {
+  if (drawerOpen || by === 0) return
+  unreadCount += by
+  storeNotify()
+}
+
+function setDrawerTab(tab: DrawerTab) {
+  if (drawerTab === tab) return
+  drawerTab = tab
   storeNotify()
 }
 
@@ -91,6 +117,104 @@ type T = (key: string, params?: Record<string, unknown>) => string
 /** Fallback translator when a slot supplies no locale seat: zh + {param} interpolation. */
 const fallbackT: T = (key, params) =>
   (zh[key] ?? key).replace(/\{(\w+)\}/g, (_, name) => String(params?.[name] ?? ''))
+
+// --- activity watch --------------------------------------------------------------
+
+export interface ToastEvent {
+  record: RunRecord
+  kind: 'completed' | 'failed'
+}
+
+/**
+ * Pure status-diff for polling: which records newly reached a terminal state
+ * (completed / failed) since the previous snapshot. Records absent from the
+ * previous snapshot count as new (a fast task can fire and finish between two
+ * polls). Exported for tests.
+ */
+export function diffRecords(prev: ReadonlyMap<string, string>, records: RunRecord[]): ToastEvent[] {
+  const events: ToastEvent[] = []
+  for (const record of records) {
+    if (record.status !== 'completed' && record.status !== 'failed') continue
+    if (prev.get(record.id) === record.status) continue
+    events.push({ record, kind: record.status })
+  }
+  return events
+}
+
+interface ToastItem extends ToastEvent {
+  key: number
+}
+
+let toastSeq = 0
+const TOAST_MS = 5000
+const POLL_MS = 20_000
+const MAX_TOASTS = 3
+
+/** One toast card; auto-dismisses, click opens the drawer on the history tab. */
+function ToastCard({ t, item, onDismiss }: { t: T; item: ToastItem; onDismiss: (key: number) => void }) {
+  useEffect(() => {
+    const timer = setTimeout(() => onDismiss(item.key), TOAST_MS)
+    return () => clearTimeout(timer)
+  }, [item.key, onDismiss])
+
+  const open = () => {
+    onDismiss(item.key)
+    openDrawer('history')
+  }
+
+  return (
+    <button type="button" className={item.kind === 'failed' ? styles.toastFailed : styles.toast} onClick={open}>
+      <div className={styles.toastTitle}>{t(`toast.${item.kind}`, { id: item.record.taskId })}</div>
+      {item.record.excerpt ? <div className={styles.toastBody}>{item.record.excerpt}</div> : null}
+    </button>
+  )
+}
+
+/**
+ * Polls run history and surfaces finished runs as toasts + badge counts.
+ * Lives in the root-scoped overlay component so exactly ONE watcher exists no
+ * matter how many sessions are open. The first poll only primes the snapshot
+ * (old records never toast).
+ */
+function useCronWatcher(): { toasts: ToastItem[]; dismiss: (key: number) => void } {
+  const snapshotRef = useRef<Map<string, string> | null>(null)
+  const [toasts, setToasts] = useState<ToastItem[]>([])
+
+  const dismiss = useCallback((key: number) => {
+    setToasts((current) => current.filter((item) => item.key !== key))
+  }, [])
+
+  useEffect(() => {
+    let stopped = false
+    const poll = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      try {
+        const { records } = await api<{ records: RunRecord[] }>('history', { limit: 20 })
+        if (stopped) return
+        const prev = snapshotRef.current
+        snapshotRef.current = new Map(records.map((r) => [r.id, r.status]))
+        if (prev === null) return // prime only
+        const events = diffRecords(prev, records)
+        if (events.length === 0) return
+        bumpUnread(events.length)
+        setToasts((current) => [
+          ...current,
+          ...events.map((event) => ({ ...event, key: toastSeq++ })),
+        ].slice(-MAX_TOASTS))
+      } catch {
+        // API unreachable (host restarting?) — stay quiet, retry next poll.
+      }
+    }
+    void poll()
+    const timer = setInterval(poll, POLL_MS)
+    return () => {
+      stopped = true
+      clearInterval(timer)
+    }
+  }, [])
+
+  return { toasts, dismiss }
+}
 
 function formatTime(iso: string | null | undefined): string {
   if (!iso) return '—'
@@ -212,8 +336,7 @@ function EditTaskForm({ t, task, onDone }: { t: T; task: TaskView; onDone: () =>
   )
 }
 
-function CronPanel({ t }: { t: T }) {
-  const [tab, setTab] = useState<'tasks' | 'history'>('tasks')
+function CronPanel({ t, tab, setTab }: { t: T; tab: DrawerTab; setTab: (tab: DrawerTab) => void }) {
   const [tasks, setTasks] = useState<TaskView[]>([])
   const [records, setRecords] = useState<RunRecord[]>([])
   const [error, setError] = useState('')
@@ -349,7 +472,8 @@ interface SlotProps {
 
 function CronDrawer({ t }: SlotProps) {
   const tr = t ?? fallbackT
-  const { open } = useDrawerState()
+  const { open, tab } = useDrawerState()
+  const { toasts, dismiss } = useCronWatcher()
 
   // Escape closes the drawer while it is open.
   useEffect(() => {
@@ -380,17 +504,22 @@ function CronDrawer({ t }: SlotProps) {
             ×
           </button>
         </div>
-        <CronPanel t={tr} />
+        <CronPanel t={tr} tab={tab} setTab={setDrawerTab} />
       </aside>
+      <div className={styles.toastStack} aria-live="polite">
+        {toasts.map((item) => (
+          <ToastCard key={item.key} t={tr} item={item} onDismiss={dismiss} />
+        ))}
+      </div>
     </>
   )
 }
 
-// --- header trigger (conversation.session.header.actions entry) -------------------
+// --- header trigger (conversation.session.header.utilities entry) -----------------
 
 function CronAction({ t }: SlotProps) {
   const tr = t ?? fallbackT
-  const { open, count } = useDrawerState()
+  const { open, count, unread } = useDrawerState()
 
   return (
     <button
@@ -407,6 +536,7 @@ function CronAction({ t }: SlotProps) {
       </svg>
       <span className={styles.triggerLabel}>{tr('trigger.aria')}</span>
       {count > 0 ? <span className={styles.count}>{count}</span> : null}
+      {unread > 0 ? <span className={styles.unreadBadge}>{unread}</span> : null}
     </button>
   )
 }

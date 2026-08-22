@@ -45,6 +45,12 @@ export const styles = {
   dot_running: 'dsh-cron-dot dsh-cron-dotRunning',
   dot_completed: 'dsh-cron-dot dsh-cron-dotCompleted',
   dot_failed: 'dsh-cron-dot dsh-cron-dotFailed',
+  unreadBadge: 'dsh-cron-unreadBadge',
+  toastStack: 'dsh-cron-toastStack',
+  toast: 'dsh-cron-toast',
+  toastFailed: 'dsh-cron-toast dsh-cron-toastFailed',
+  toastTitle: 'dsh-cron-toastTitle',
+  toastBody: 'dsh-cron-toastBody',
 } as const
 
 export const css = `
@@ -158,6 +164,34 @@ export const css = `
 .dsh-cron-ghostButton:hover { color: var(--dsw-alias-label-primary, #222); }
 .dsh-cron-form .dsh-cron-primaryButton { flex: 1; }
 .dsh-cron-form .dsh-cron-ghostButton { flex: 1; width: auto; }
+.dsh-cron-unreadBadge {
+  position: absolute; top: -4px; right: -6px; min-width: 14px; height: 14px; padding: 0 3px;
+  border-radius: 7px; background: #ef4444; color: #fff; font-size: 9px; line-height: 14px;
+  text-align: center; font-variant-numeric: tabular-nums; box-sizing: border-box;
+}
+.dsh-cron-trigger { position: relative; }
+.dsh-cron-toastStack {
+  position: fixed; top: 56px; right: 16px; z-index: 950;
+  display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+}
+.dsh-cron-toast {
+  pointer-events: auto; width: 300px; max-width: 80vw; text-align: left; cursor: pointer;
+  border: 1px solid var(--dsw-alias-border-l2, #ddd); border-left: 3px solid #22c55e;
+  background: var(--dsw-specific-menu, #fff); border-radius: 10px; padding: 10px 12px;
+  box-shadow: var(--dsw-shadow-lv3, 0 8px 24px rgba(0,0,0,.14));
+  display: flex; flex-direction: column; gap: 3px;
+  animation: dsh-cron-toast-in .18s ease;
+}
+.dsh-cron-toastFailed { border-left-color: #ef4444; }
+.dsh-cron-toastTitle { font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-primary, #222); }
+.dsh-cron-toastBody {
+  font-size: 11px; color: var(--dsw-alias-label-secondary, #666);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+@keyframes dsh-cron-toast-in {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
 .dsh-cron-error {
   margin: 4px; padding: 6px 8px; border-radius: 6px; font-size: 11px;
   background: rgba(239, 68, 68, .1); color: #ef4444;

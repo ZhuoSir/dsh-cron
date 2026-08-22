@@ -3,6 +3,8 @@
 export const zh: Record<string, string> = {
   'trigger.aria': '定时任务',
   'drawer.close': '关闭',
+  'toast.completed': '任务 {id} 已完成',
+  'toast.failed': '任务 {id} 执行失败',
   'tab.tasks': '任务',
   'tab.history': '执行记录',
   'tasks.empty': '还没有定时任务。在对话中直接说，比如「每周一早上9点提醒我交周报」，Agent 会自动创建。',
@@ -46,6 +48,8 @@ export const zh: Record<string, string> = {
 export const en: Record<string, string> = {
   'trigger.aria': 'Scheduled tasks',
   'drawer.close': 'Close',
+  'toast.completed': 'Task {id} completed',
+  'toast.failed': 'Task {id} failed',
   'tab.tasks': 'Tasks',
   'tab.history': 'History',
   'tasks.empty': 'No scheduled tasks yet. Just say it in chat, e.g. "remind me every Monday at 9am to submit the weekly report".',
