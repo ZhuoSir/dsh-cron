@@ -3,6 +3,7 @@
 
 export const styles = {
   trigger: 'dsh-cron-trigger',
+  triggerLabel: 'dsh-cron-triggerLabel',
   triggerActive: 'dsh-cron-trigger dsh-cron-triggerActive',
   count: 'dsh-cron-count',
   mask: 'dsh-cron-mask',
@@ -55,6 +56,7 @@ export const css = `
 }
 .dsh-cron-trigger:hover, .dsh-cron-trigger:focus-visible { color: var(--dsw-alias-label-secondary, #555); }
 .dsh-cron-triggerActive { color: var(--dsw-alias-label-primary, #222); background: var(--dsw-alias-fill-l2, #f2f2f2); }
+.dsh-cron-triggerLabel { font-size: 12px; }
 .dsh-cron-count { margin: 0 2px; font-variant-numeric: tabular-nums; }
 
 /* mask + right drawer (rendered into shell.overlay, so fixed positioning is
