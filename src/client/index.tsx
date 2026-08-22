@@ -35,7 +35,7 @@ let unreadCount = 0
 let drawerTab: DrawerTab = 'tasks'
 let toastSeq = 0
 let toasts: ToastItem[] = []
-const TOAST_MS = 5000
+const TOAST_MS = 8000
 const MAX_TOASTS = 3
 
 // useSyncExternalStore requires a cached snapshot: returning a fresh object
@@ -166,10 +166,12 @@ const POLL_MS = 20_000
 
 /** One toast card; auto-dismisses, click opens the drawer on the history tab. */
 function ToastCard({ t, item }: { t: T; item: ToastItem }) {
+  const sticky = item.kind === 'failed'
   useEffect(() => {
+    if (sticky) return // failures stay until clicked
     const timer = setTimeout(() => dismissToast(item.key), TOAST_MS)
     return () => clearTimeout(timer)
-  }, [item.key])
+  }, [item.key, sticky])
 
   const open = () => {
     dismissToast(item.key)
@@ -209,7 +211,7 @@ function useCronWatcher(): void {
         }
         const events = diffRecords(prev, records)
         if (events.length === 0) return
-        console.info('[dsh-cron] %d task run(s) finished:', events.map((e) => `${e.record.taskId}:${e.kind}`).join(', '))
+        console.info('[dsh-cron]', events.length, 'task run(s) finished:', events.map((e) => `${e.record.taskId}:${e.kind}`).join(', '))
         bumpUnread(events.length)
         for (const event of events) pushToast(event)
       } catch (error) {
