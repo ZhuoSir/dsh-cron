@@ -87,7 +87,7 @@ HTTP API 通过可选注入挂载（`ctx.inject(['webServer','webRuntime'])`）�
 | **HTTP API** | `POST /cron/api/*`，仅接受 loopback 或 `trustedHosts` 来源（Host 头校验 + 拒绝 `sec-fetch-site: cross-site`），防 DNS 重绑定/跨站调用 | 低；仅本机页面可访问 |
 | **网络访问** | ❌ 插件自身不发起任何网络请求 | 无 |
 | **安装脚本** | ❌ 无 `prepare`/`postinstall` 等任何安装期脚本 | 无（GitHub 安装不需要构建授权） |
-| **Shell / 系统命令** | ❌ 不调用 | 无 |
+| **Shell / 系统命令** | ⚠️ 仅用于系统通知：macOS 调 `osascript -e 'display notification …'`、Linux 调 `notify-send`；可用 `systemNotify: false` 完全关闭 | 低；命令固定无注入面（参数经 JSON 转义） |
 
 可靠性设计：任务运行记录持久化（重启不重发）、`daily` 错过补发一次、所有回调入口有防崩溃包裹（插件故障不会拖垮宿主进程）、会话绑定失效自动回退并记日志。
 
@@ -97,7 +97,7 @@ HTTP API 通过可选注入挂载（`ctx.inject(['webServer','webRuntime'])`）�
 |---|---|
 | DeepSeek Harness | `>= 0.1.0-rc.6`（在 `0.1.0-rc.7` / `rc.8` 上实测） |
 | Node.js | `>= 22`（跟随 DSH 的运行要求） |
-| 平台 | macOS 已实测；Linux / Windows 预期可用（纯 Node + 本地时区，无平台 API 依赖），未实测 |
+| 平台 | macOS 已实测（含原生通知）；Linux 预期可用（通知需 `notify-send`）；Windows 调度/面板可用但无原生通知 |
 | 浏览器 | 跟随 DSH Web 壳（现代浏览器，React 18 运行时由壳提供） |
 | pnpm | 仅开发构建需要 `>= 10`；**安装使用不需要** |
 

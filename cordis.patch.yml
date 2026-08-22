@@ -14,10 +14,18 @@
         # Scheduler wake interval in seconds. Lower bounds how late a due
         # task can fire; 15s is a good default.
         tickSeconds: 15
+        # Native OS notification when a run finishes (macOS osascript / Linux
+        # notify-send). Fires from the host process — works with no browser
+        # open at all.
+        systemNotify: true
+        # Play the OS alert sound with the native notification.
+        systemNotifySound: true
         # Static tasks declared in config. Dynamic tasks created through the
         # cron_add tool live in the storage file instead.
-        # Each task: { id, prompt, at? | every? | daily?, enabled? }
+        # Each task: { id?, prompt, at? | every? | daily? | cron?, sessionId?, enabled? }
         #   at:    ISO 8601 instant, fires once        ("2026-08-23T09:00:00+08:00")
-        #   every: fixed interval in seconds, min 60   (3600)
+        #   every: fixed interval in seconds, min 10   (3600)
         #   daily: local wall-clock "HH:MM", fires daily ("09:30")
+        #   cron:  5-field expression, local time      ("0 9 * * 1" = Mon 09:00)
+        #   sessionId: bind delivery to one session instead of the active one
         tasks: []

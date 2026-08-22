@@ -15,6 +15,7 @@
 // POST /cron/api/<method> for its client-half panel (optional webServer
 // injection: headless profiles keep full scheduling without the API).
 
+import { execFile } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -52,6 +53,10 @@ export const Config = Schema.object({
   storagePath: Schema.string().default(''),
   historyPath: Schema.string().default(''),
   tickSeconds: Schema.number().default(15),
+  // Native OS notifications on run completion — these fire from the host
+  // process, so they appear even with NO browser open.
+  systemNotify: Schema.boolean().default(true),
+  systemNotifySound: Schema.boolean().default(true),
   tasks: Schema.array(TaskSchema).default([]),
 })
 
@@ -376,6 +381,24 @@ function writeJson(res, status, body) {
   res.end(payload)
 }
 
+/**
+ * Best-effort native OS notification, fired from the host process: it appears
+ * even when no browser is open at all. macOS uses osascript (Glass sound),
+ * Linux uses notify-send when installed; anything else is a quiet no-op.
+ * Never throws, never blocks the scheduler.
+ */
+function sendSystemNotification(title, body, { sound = true } = {}) {
+  try {
+    const text = String(body ?? '').replace(/\s+/g, ' ').slice(0, 200)
+    if (process.platform === 'darwin') {
+      const script = `display notification ${JSON.stringify(text)} with title ${JSON.stringify(String(title))}${sound ? ' sound name "Glass"' : ''}`
+      execFile('osascript', ['-e', script], { timeout: 5000 }, () => {})
+    } else if (process.platform === 'linux') {
+      execFile('notify-send', [String(title), text], { timeout: 5000 }, () => {})
+    }
+  } catch { /* best effort only */ }
+}
+
 // --- plugin ------------------------------------------------------------------
 
 export function apply(ctx, config) {
@@ -589,6 +612,13 @@ export function apply(ctx, config) {
           endReason: kind,
           completedAt: Date.now(),
         })
+        if (config.systemNotify) {
+          const record = history.find((r) => r.id === run.recordId)
+          if (record) {
+            const title = kind === 'completed' ? `定时任务完成：${record.taskId}` : `定时任务失败：${record.taskId}`
+            sendSystemNotification(title, record.excerpt || record.prompt, { sound: config.systemNotifySound })
+          }
+        }
       }
     }
   }))

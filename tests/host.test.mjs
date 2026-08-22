@@ -28,7 +28,7 @@ function makeCtx(storagePath, historyPath, configTasks) {
     inject: () => {}, // webServer optional injection: skipped in this mock
     tools: { register: (def) => tools.set(def.name, def) },
   }
-  apply(ctx, Config({ storagePath, historyPath, tickSeconds: 1, tasks: configTasks }))
+  apply(ctx, Config({ storagePath, historyPath, tickSeconds: 1, tasks: configTasks, systemNotify: false }))
   const emit = (event, ...args) => listeners.get(event)?.(...args)
   return { ctx, fired, tools, disposers, mockAgent, mockSession, emit }
 }

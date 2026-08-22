@@ -38,10 +38,42 @@ let toasts: ToastItem[] = []
 const TOAST_MS = 8000
 const MAX_TOASTS = 3
 
+// --- user preferences (persisted) ------------------------------------------
+
+interface Prefs {
+  /** Play a chime on task completion/failure (false = 静音). */
+  sound: boolean
+  /** Browser system notifications (work while the tab is in the background). */
+  system: boolean
+}
+
+const PREFS_KEY = 'dsh-cron:prefs'
+
+function loadPrefs(): Prefs {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(PREFS_KEY) : null
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      return { sound: parsed.sound !== false, system: parsed.system === true }
+    }
+  } catch { /* fall through to defaults */ }
+  return { sound: true, system: false }
+}
+
+let prefs: Prefs = loadPrefs()
+
+function setPref<K extends keyof Prefs>(key: K, value: Prefs[K]) {
+  prefs = { ...prefs, [key]: value }
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(PREFS_KEY, JSON.stringify(prefs))
+  } catch { /* storage unavailable */ }
+  storeNotify()
+}
+
 // useSyncExternalStore requires a cached snapshot: returning a fresh object
 // from getSnapshot causes an infinite render loop.
-interface DrawerSnapshot { open: boolean; count: number; unread: number; tab: DrawerTab; toasts: ToastItem[] }
-let snapshot: DrawerSnapshot = { open: drawerOpen, count: enabledCount, unread: unreadCount, tab: drawerTab, toasts }
+interface DrawerSnapshot { open: boolean; count: number; unread: number; tab: DrawerTab; toasts: ToastItem[]; prefs: Prefs }
+let snapshot: DrawerSnapshot = { open: drawerOpen, count: enabledCount, unread: unreadCount, tab: drawerTab, toasts, prefs }
 const storeListeners = new Set<() => void>()
 
 function storeSubscribe(listener: () => void) {
@@ -50,7 +82,7 @@ function storeSubscribe(listener: () => void) {
 }
 
 function storeNotify() {
-  snapshot = { open: drawerOpen, count: enabledCount, unread: unreadCount, tab: drawerTab, toasts }
+  snapshot = { open: drawerOpen, count: enabledCount, unread: unreadCount, tab: drawerTab, toasts, prefs }
   for (const listener of storeListeners) listener()
 }
 
@@ -164,6 +196,60 @@ export function diffRecords(prev: ReadonlyMap<string, string>, records: RunRecor
 
 const POLL_MS = 20_000
 
+// --- sound + system notifications ----------------------------------------------
+
+/**
+ * Short synthesized chime (no audio asset needed). Completed: rising major
+ * fifth; failed: falling minor second. Autoplay policies may block the very
+ * first playback before any user gesture — silently skipped.
+ */
+function playChime(kind: 'completed' | 'failed') {
+  try {
+    const Ctor = (window as any).AudioContext ?? (window as any).webkitAudioContext
+    if (!Ctor) return
+    const audio = new Ctor() as AudioContext
+    void audio.resume?.()
+    const frequencies = kind === 'failed' ? [311.13, 293.66] : [523.25, 783.99]
+    frequencies.forEach((freq, index) => {
+      const osc = audio.createOscillator()
+      const gain = audio.createGain()
+      osc.type = 'sine'
+      osc.frequency.value = freq
+      const t0 = audio.currentTime + index * 0.12
+      gain.gain.setValueAtTime(0, t0)
+      gain.gain.linearRampToValueAtTime(0.12, t0 + 0.02)
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.35)
+      osc.connect(gain).connect(audio.destination)
+      osc.start(t0)
+      osc.stop(t0 + 0.4)
+    })
+    setTimeout(() => void audio.close().catch(() => {}), 1200)
+  } catch { /* audio unavailable */ }
+}
+
+/** Browser-level system notification: appears even when this tab is backgrounded. */
+function sendBrowserNotification(event: ToastEvent) {
+  try {
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
+    const title = fallbackT(`toast.${event.kind}`, { id: event.record.taskId })
+    const body = (event.record.excerpt || event.record.prompt || '').slice(0, 200)
+    const notification = new Notification(title, { body, tag: event.record.id })
+    notification.onclick = () => {
+      window.focus()
+      openDrawer('history')
+    }
+  } catch { /* best effort */ }
+}
+
+/** Central fan-out for newly finished runs: toasts + badge + sound + system. */
+function notifyEvents(events: ToastEvent[]) {
+  if (events.length === 0) return
+  bumpUnread(events.length)
+  for (const event of events) pushToast(event)
+  if (prefs.sound) playChime(events.some((e) => e.kind === 'failed') ? 'failed' : 'completed')
+  if (prefs.system) for (const event of events) sendBrowserNotification(event)
+}
+
 /** One toast card; auto-dismisses, click opens the drawer on the history tab. */
 function ToastCard({ t, item }: { t: T; item: ToastItem }) {
   const sticky = item.kind === 'failed'
@@ -212,8 +298,7 @@ function useCronWatcher(): void {
         const events = diffRecords(prev, records)
         if (events.length === 0) return
         console.info('[dsh-cron]', events.length, 'task run(s) finished:', events.map((e) => `${e.record.taskId}:${e.kind}`).join(', '))
-        bumpUnread(events.length)
-        for (const event of events) pushToast(event)
+        notifyEvents(events)
       } catch (error) {
         // API unreachable (host restarting?) — stay quiet, retry next poll.
         console.warn('[dsh-cron] watcher poll failed:', error)
@@ -484,7 +569,7 @@ interface SlotProps {
 
 function CronDrawer({ t }: SlotProps) {
   const tr = t ?? fallbackT
-  const { open, tab, toasts } = useDrawerState()
+  const { open, tab, toasts, prefs: currentPrefs } = useDrawerState()
   useCronWatcher()
 
   // Escape closes the drawer while it is open.
@@ -499,14 +584,29 @@ function CronDrawer({ t }: SlotProps) {
 
   // Diagnostics helper: prove the toast pipeline without waiting for a task.
   const testToast = () => {
-    console.info('[dsh-cron] test toast pushed from the drawer header')
-    pushToast({
+    console.info('[dsh-cron] test notification pushed from the drawer header')
+    notifyEvents([{
       kind: 'completed',
       record: {
         id: 'toast-test', taskId: 'toast-test', prompt: '', scheduledFor: '', firedAt: '',
         status: 'completed', excerpt: tr('toast.testBody'),
       },
-    })
+    }])
+  }
+
+  const toggleSystem = async () => {
+    if (currentPrefs.system) {
+      setPref('system', false)
+      return
+    }
+    if (typeof Notification === 'undefined') return
+    if (Notification.permission === 'default') {
+      try {
+        await Notification.requestPermission()
+      } catch { /* older engines */ }
+    }
+    if (Notification.permission === 'granted') setPref('system', true)
+    else console.warn('[dsh-cron] notification permission:', Notification.permission)
   }
 
   return (
@@ -519,6 +619,25 @@ function CronDrawer({ t }: SlotProps) {
       <aside className={open ? styles.drawerOpen : styles.drawer} aria-hidden={!open}>
         <div className={styles.drawerHead}>
           <span className={styles.drawerTitle}>{tr('trigger.aria')}</span>
+          <span className={styles.headSpacer} />
+          <button
+            type="button"
+            className={currentPrefs.system ? styles.headToggleOn : styles.drawerClose}
+            aria-label={tr('prefs.system')}
+            title={tr('prefs.system')}
+            onClick={() => void toggleSystem()}
+          >
+            {currentPrefs.system ? '🔔' : '🔕'}
+          </button>
+          <button
+            type="button"
+            className={currentPrefs.sound ? styles.headToggleOn : styles.drawerClose}
+            aria-label={tr('prefs.sound')}
+            title={tr('prefs.sound')}
+            onClick={() => setPref('sound', !currentPrefs.sound)}
+          >
+            {currentPrefs.sound ? '🔊' : '🔇'}
+          </button>
           <button
             type="button"
             className={styles.drawerClose}
@@ -526,7 +645,7 @@ function CronDrawer({ t }: SlotProps) {
             title={tr('drawer.test')}
             onClick={testToast}
           >
-            🔔
+            🧪
           </button>
           <button
             type="button"
