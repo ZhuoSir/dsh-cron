@@ -42,7 +42,7 @@
     "build": "tsdown && node scripts/wrap-client.mjs",
     "watch": "tsdown --watch",
     "typecheck": "tsc --noEmit",
-    "test": "node tests/host.test.mjs && node tests/client.test.mjs"
+    "test": "node tests/host.test.mjs && node tests/client.test.mjs && node tests/toast-render.test.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
@@ -57,6 +57,7 @@
     "@deepseek-ai/dsh-client-ui-primitives": "0.1.0-rc.8",
     "@types/react": "~18.3.1",
     "@types/react-dom": "~18.3.1",
+    "jsdom": "^30.0.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "tsdown": "^0.22.2",
