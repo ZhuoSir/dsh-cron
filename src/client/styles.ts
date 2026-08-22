@@ -171,7 +171,7 @@ export const css = `
 }
 .dsh-cron-trigger { position: relative; }
 .dsh-cron-toastStack {
-  position: fixed; top: 56px; right: 16px; z-index: 950;
+  position: fixed; top: 56px; right: 16px; z-index: 1200;
   display: flex; flex-direction: column; gap: 8px; pointer-events: none;
 }
 .dsh-cron-toast {

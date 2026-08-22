@@ -3,6 +3,8 @@
 export const zh: Record<string, string> = {
   'trigger.aria': '定时任务',
   'drawer.close': '关闭',
+  'drawer.test': '测试通知',
+  'toast.testBody': '这是一条测试通知：任务完成后会像这样提醒你。',
   'toast.completed': '任务 {id} 已完成',
   'toast.failed': '任务 {id} 执行失败',
   'tab.tasks': '任务',
@@ -48,6 +50,8 @@ export const zh: Record<string, string> = {
 export const en: Record<string, string> = {
   'trigger.aria': 'Scheduled tasks',
   'drawer.close': 'Close',
+  'drawer.test': 'Test notification',
+  'toast.testBody': 'This is a test notification: finished tasks will notify you like this.',
   'toast.completed': 'Task {id} completed',
   'toast.failed': 'Task {id} failed',
   'tab.tasks': 'Tasks',

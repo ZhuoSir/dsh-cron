@@ -10,23 +10,38 @@ import { css, styles } from './styles.js'
 /** Services required from the client runtime. */
 export const inject = ['slots', 'locale']
 
-// --- shared drawer store -----------------------------------------------------
+// --- shared store --------------------------------------------------------------
 //
 // The trigger (session-header slot) and the drawer (shell.overlay slot) live
 // in different render trees, so open-state, the enabled-task count, the
-// unread-activity badge, and the selected tab travel through this tiny
-// module-level store.
+// unread-activity badge, the selected tab, and the toast stack travel through
+// this tiny module-level store.
 
 type DrawerTab = 'tasks' | 'history'
+
+/** One activity toast derived from a run record reaching a terminal state. */
+interface ToastEvent {
+  record: RunRecord
+  kind: 'completed' | 'failed'
+}
+
+interface ToastItem extends ToastEvent {
+  key: number
+}
 
 let drawerOpen = false
 let enabledCount = 0
 let unreadCount = 0
 let drawerTab: DrawerTab = 'tasks'
+let toastSeq = 0
+let toasts: ToastItem[] = []
+const TOAST_MS = 5000
+const MAX_TOASTS = 3
+
 // useSyncExternalStore requires a cached snapshot: returning a fresh object
 // from getSnapshot causes an infinite render loop.
-interface DrawerSnapshot { open: boolean; count: number; unread: number; tab: DrawerTab }
-let snapshot: DrawerSnapshot = { open: drawerOpen, count: enabledCount, unread: unreadCount, tab: drawerTab }
+interface DrawerSnapshot { open: boolean; count: number; unread: number; tab: DrawerTab; toasts: ToastItem[] }
+let snapshot: DrawerSnapshot = { open: drawerOpen, count: enabledCount, unread: unreadCount, tab: drawerTab, toasts }
 const storeListeners = new Set<() => void>()
 
 function storeSubscribe(listener: () => void) {
@@ -35,7 +50,7 @@ function storeSubscribe(listener: () => void) {
 }
 
 function storeNotify() {
-  snapshot = { open: drawerOpen, count: enabledCount, unread: unreadCount, tab: drawerTab }
+  snapshot = { open: drawerOpen, count: enabledCount, unread: unreadCount, tab: drawerTab, toasts }
   for (const listener of storeListeners) listener()
 }
 
@@ -68,6 +83,17 @@ function bumpUnread(by: number) {
 function setDrawerTab(tab: DrawerTab) {
   if (drawerTab === tab) return
   drawerTab = tab
+  storeNotify()
+}
+
+/** Push one toast onto the stack (shared by the watcher and the test button). */
+function pushToast(event: ToastEvent) {
+  toasts = [...toasts, { ...event, key: toastSeq++ }].slice(-MAX_TOASTS)
+  storeNotify()
+}
+
+function dismissToast(key: number) {
+  toasts = toasts.filter((item) => item.key !== key)
   storeNotify()
 }
 
@@ -120,11 +146,6 @@ const fallbackT: T = (key, params) =>
 
 // --- activity watch --------------------------------------------------------------
 
-export interface ToastEvent {
-  record: RunRecord
-  kind: 'completed' | 'failed'
-}
-
 /**
  * Pure status-diff for polling: which records newly reached a terminal state
  * (completed / failed) since the previous snapshot. Records absent from the
@@ -141,24 +162,17 @@ export function diffRecords(prev: ReadonlyMap<string, string>, records: RunRecor
   return events
 }
 
-interface ToastItem extends ToastEvent {
-  key: number
-}
-
-let toastSeq = 0
-const TOAST_MS = 5000
 const POLL_MS = 20_000
-const MAX_TOASTS = 3
 
 /** One toast card; auto-dismisses, click opens the drawer on the history tab. */
-function ToastCard({ t, item, onDismiss }: { t: T; item: ToastItem; onDismiss: (key: number) => void }) {
+function ToastCard({ t, item }: { t: T; item: ToastItem }) {
   useEffect(() => {
-    const timer = setTimeout(() => onDismiss(item.key), TOAST_MS)
+    const timer = setTimeout(() => dismissToast(item.key), TOAST_MS)
     return () => clearTimeout(timer)
-  }, [item.key, onDismiss])
+  }, [item.key])
 
   const open = () => {
-    onDismiss(item.key)
+    dismissToast(item.key)
     openDrawer('history')
   }
 
@@ -176,16 +190,12 @@ function ToastCard({ t, item, onDismiss }: { t: T; item: ToastItem; onDismiss: (
  * matter how many sessions are open. The first poll only primes the snapshot
  * (old records never toast).
  */
-function useCronWatcher(): { toasts: ToastItem[]; dismiss: (key: number) => void } {
+function useCronWatcher(): void {
   const snapshotRef = useRef<Map<string, string> | null>(null)
-  const [toasts, setToasts] = useState<ToastItem[]>([])
-
-  const dismiss = useCallback((key: number) => {
-    setToasts((current) => current.filter((item) => item.key !== key))
-  }, [])
 
   useEffect(() => {
     let stopped = false
+    console.info('[dsh-cron] watcher started (poll every %ds)', POLL_MS / 1000)
     const poll = async () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
       try {
@@ -193,16 +203,18 @@ function useCronWatcher(): { toasts: ToastItem[]; dismiss: (key: number) => void
         if (stopped) return
         const prev = snapshotRef.current
         snapshotRef.current = new Map(records.map((r) => [r.id, r.status]))
-        if (prev === null) return // prime only
+        if (prev === null) {
+          console.info('[dsh-cron] watcher primed with %d record(s)', records.length)
+          return
+        }
         const events = diffRecords(prev, records)
         if (events.length === 0) return
+        console.info('[dsh-cron] %d task run(s) finished:', events.map((e) => `${e.record.taskId}:${e.kind}`).join(', '))
         bumpUnread(events.length)
-        setToasts((current) => [
-          ...current,
-          ...events.map((event) => ({ ...event, key: toastSeq++ })),
-        ].slice(-MAX_TOASTS))
-      } catch {
+        for (const event of events) pushToast(event)
+      } catch (error) {
         // API unreachable (host restarting?) — stay quiet, retry next poll.
+        console.warn('[dsh-cron] watcher poll failed:', error)
       }
     }
     void poll()
@@ -212,8 +224,6 @@ function useCronWatcher(): { toasts: ToastItem[]; dismiss: (key: number) => void
       clearInterval(timer)
     }
   }, [])
-
-  return { toasts, dismiss }
 }
 
 function formatTime(iso: string | null | undefined): string {
@@ -472,8 +482,8 @@ interface SlotProps {
 
 function CronDrawer({ t }: SlotProps) {
   const tr = t ?? fallbackT
-  const { open, tab } = useDrawerState()
-  const { toasts, dismiss } = useCronWatcher()
+  const { open, tab, toasts } = useDrawerState()
+  useCronWatcher()
 
   // Escape closes the drawer while it is open.
   useEffect(() => {
@@ -484,6 +494,18 @@ function CronDrawer({ t }: SlotProps) {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [open])
+
+  // Diagnostics helper: prove the toast pipeline without waiting for a task.
+  const testToast = () => {
+    console.info('[dsh-cron] test toast pushed from the drawer header')
+    pushToast({
+      kind: 'completed',
+      record: {
+        id: 'toast-test', taskId: 'toast-test', prompt: '', scheduledFor: '', firedAt: '',
+        status: 'completed', excerpt: tr('toast.testBody'),
+      },
+    })
+  }
 
   return (
     <>
@@ -498,6 +520,15 @@ function CronDrawer({ t }: SlotProps) {
           <button
             type="button"
             className={styles.drawerClose}
+            aria-label={tr('drawer.test')}
+            title={tr('drawer.test')}
+            onClick={testToast}
+          >
+            🔔
+          </button>
+          <button
+            type="button"
+            className={styles.drawerClose}
             aria-label={tr('drawer.close')}
             onClick={() => setDrawerOpen(false)}
           >
@@ -508,7 +539,7 @@ function CronDrawer({ t }: SlotProps) {
       </aside>
       <div className={styles.toastStack} aria-live="polite">
         {toasts.map((item) => (
-          <ToastCard key={item.key} t={tr} item={item} onDismiss={dismiss} />
+          <ToastCard key={item.key} t={tr} item={item} />
         ))}
       </div>
     </>
