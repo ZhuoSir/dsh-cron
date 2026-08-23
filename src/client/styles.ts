@@ -14,7 +14,8 @@ export const styles = {
   drawerTitle: 'dsh-cron-drawerTitle',
   drawerClose: 'dsh-cron-drawerClose',
   headSpacer: 'dsh-cron-headSpacer',
-  headToggleOn: 'dsh-cron-drawerClose dsh-cron-headToggleOn',
+  headText: 'dsh-cron-headText',
+  headTextOn: 'dsh-cron-headText dsh-cron-headTextOn',
   tabs: 'dsh-cron-tabs',
   tab: 'dsh-cron-tab',
   tabActive: 'dsh-cron-tab dsh-cron-tabActive',
@@ -96,7 +97,16 @@ export const css = `
 }
 .dsh-cron-drawerClose:hover { color: var(--dsw-alias-label-primary, #222); background: var(--dsw-alias-fill-l2, #f2f2f2); }
 .dsh-cron-headSpacer { flex: 1; }
-.dsh-cron-headToggleOn { opacity: 1; background: var(--dsw-alias-fill-l2, #f2f2f2); }
+.dsh-cron-headText {
+  border: 0; background: 0; cursor: pointer; font-size: 11px; line-height: 1;
+  color: var(--dsw-alias-label-tertiary, #999); padding: 5px 6px; border-radius: 6px;
+  white-space: nowrap;
+}
+.dsh-cron-headText:hover { color: var(--dsw-alias-label-primary, #222); background: var(--dsw-alias-fill-l2, #f2f2f2); }
+.dsh-cron-headTextOn {
+  color: var(--dsw-alias-label-primary, #222); background: var(--dsw-alias-fill-l2, #f2f2f2);
+  font-weight: 600;
+}
 
 /* panel body */
 .dsh-cron-tabs { flex: none; display: flex; gap: 2px; padding: 8px 10px 6px; border-bottom: 1px solid var(--dsw-alias-border-l2, #eee); }

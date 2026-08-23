@@ -622,38 +622,39 @@ function CronDrawer({ t }: SlotProps) {
           <span className={styles.headSpacer} />
           <button
             type="button"
-            className={currentPrefs.system ? styles.headToggleOn : styles.drawerClose}
+            className={currentPrefs.system ? styles.headTextOn : styles.headText}
             aria-label={tr('prefs.system')}
             title={tr('prefs.system')}
             onClick={() => void toggleSystem()}
           >
-            {currentPrefs.system ? '🔔' : '🔕'}
+            {tr('prefs.systemShort')}
           </button>
           <button
             type="button"
-            className={currentPrefs.sound ? styles.headToggleOn : styles.drawerClose}
+            className={currentPrefs.sound ? styles.headTextOn : styles.headText}
             aria-label={tr('prefs.sound')}
             title={tr('prefs.sound')}
             onClick={() => setPref('sound', !currentPrefs.sound)}
           >
-            {currentPrefs.sound ? '🔊' : '🔇'}
+            {tr('prefs.soundShort')}
           </button>
           <button
             type="button"
-            className={styles.drawerClose}
+            className={styles.headText}
             aria-label={tr('drawer.test')}
             title={tr('drawer.test')}
             onClick={testToast}
           >
-            🧪
+            {tr('drawer.testShort')}
           </button>
           <button
             type="button"
-            className={styles.drawerClose}
+            className={styles.headText}
             aria-label={tr('drawer.close')}
+            title={tr('drawer.close')}
             onClick={() => setDrawerOpen(false)}
           >
-            ×
+            {tr('drawer.close')}
           </button>
         </div>
         <CronPanel t={tr} tab={tab} setTab={setDrawerTab} />
@@ -682,10 +683,6 @@ function CronAction({ t }: SlotProps) {
       title={tr('trigger.aria')}
       onClick={() => setDrawerOpen(!open)}
     >
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="10" />
-        <polyline points="12 6 12 12 16 14" />
-      </svg>
       <span className={styles.triggerLabel}>{tr('trigger.aria')}</span>
       {count > 0 ? <span className={styles.count}>{count}</span> : null}
       {unread > 0 ? <span className={styles.unreadBadge}>{unread}</span> : null}

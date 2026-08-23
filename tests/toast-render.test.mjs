@@ -85,7 +85,7 @@ await act(async () => {
 // so instead verify with the test-toast path AND with a second fetch round via
 // manual dispatch: call fetch again happens only inside the watcher... instead
 // we directly assert the store->DOM path using the header test button.
-const testButton = [...document.querySelectorAll('button')].find((b) => b.textContent === '🔔')
+const testButton = [...document.querySelectorAll('button')].find((b) => /test|测试/i.test(b.textContent ?? ''))
 assert.ok(testButton, 'test-toast button present')
 await act(async () => {
   testButton.click()
