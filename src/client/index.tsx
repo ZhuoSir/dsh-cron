@@ -4,6 +4,7 @@
 // drawer does not. The panel talks to the host half over POST /cron/api/<method>.
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { createPortal } from 'react-dom'
 import { zh, en } from './locale.js'
 import { css, styles } from './styles.js'
 
@@ -659,11 +660,17 @@ function CronDrawer({ t }: SlotProps) {
         </div>
         <CronPanel t={tr} tab={tab} setTab={setDrawerTab} />
       </aside>
-      <div className={styles.toastStack} aria-live="polite">
-        {toasts.map((item) => (
-          <ToastCard key={item.key} t={tr} item={item} />
-        ))}
-      </div>
+      {// Toasts must outrank every plugin overlay: the shell.overlay layer is
+      // only z-index 20, so portal the stack to <body> with a topmost z-index
+      // instead of letting other plugins' floating UI cover it.
+      createPortal(
+        <div className={styles.toastStack} aria-live="polite">
+          {toasts.map((item) => (
+            <ToastCard key={item.key} t={tr} item={item} />
+          ))}
+        </div>,
+        document.body,
+      )}
     </>
   )
 }
