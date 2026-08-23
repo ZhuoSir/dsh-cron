@@ -77,7 +77,7 @@ export const css = `
 .dsh-cron-maskOpen { opacity: 1; pointer-events: auto; }
 .dsh-cron-drawer {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 901;
-  width: 400px; max-width: 92vw; box-sizing: border-box;
+  width: 560px; max-width: 94vw; box-sizing: border-box;
   display: flex; flex-direction: column;
   background: var(--dsw-specific-menu, #fff);
   border-left: 1px solid var(--dsw-alias-border-l2, #ddd);
@@ -133,7 +133,7 @@ export const css = `
 .dsh-cron-dotRunning { background: #3b82f6; }
 .dsh-cron-dotCompleted { background: #22c55e; }
 .dsh-cron-dotFailed { background: #ef4444; }
-.dsh-cron-taskId { font-family: var(--dsw-font-mono, monospace); font-size: 12px; color: var(--dsw-alias-label-primary, #222); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dsh-cron-taskId { font-family: var(--dsw-font-mono, monospace); font-size: 12px; color: var(--dsw-alias-label-primary, #222); flex: 1; min-width: 0; word-break: break-all; }
 .dsh-cron-badge {
   flex: none; font-size: 10px; line-height: 16px; padding: 0 6px; border-radius: 5px;
   background: var(--dsw-alias-fill-l2, #eee); color: var(--dsw-alias-label-secondary, #666);
@@ -141,9 +141,9 @@ export const css = `
 .dsh-cron-time { flex: none; font-size: 11px; color: var(--dsw-alias-label-tertiary, #999); }
 .dsh-cron-prompt {
   font-size: 12px; color: var(--dsw-alias-label-secondary, #555);
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;
 }
-.dsh-cron-meta { display: flex; justify-content: space-between; font-size: 11px; color: var(--dsw-alias-label-tertiary, #999); }
+.dsh-cron-meta { display: flex; justify-content: space-between; gap: 4px 12px; flex-wrap: wrap; font-size: 11px; color: var(--dsw-alias-label-tertiary, #999); }
 .dsh-cron-actions { display: flex; gap: 8px; }
 .dsh-cron-action {
   border: 0; background: 0; cursor: pointer; padding: 2px 0; font-size: 11px;
@@ -200,7 +200,7 @@ export const css = `
 .dsh-cron-toastTitle { font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-primary, #222); }
 .dsh-cron-toastBody {
   font-size: 11px; color: var(--dsw-alias-label-secondary, #666);
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
 @keyframes dsh-cron-toast-in {
   from { opacity: 0; transform: translateX(16px); }
