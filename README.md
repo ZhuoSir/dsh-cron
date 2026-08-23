@@ -2,7 +2,7 @@
 
 > 定时任务插件：让 DeepSeek Harness 在指定时间自动执行任务——到点把任务提示注入会话，Agent 被唤醒后自动执行并在会话中回复结果。自带 Web 管理抽屉（任务列表 + 执行记录）。
 
-![许可证](https://img.shields.io/badge/license-MIT-blue) ![DSH](https://img.shields.io/badge/dsh-%3E%3D0.1.0--rc.6-blueviolet) ![Node](https://img.shields.io/badge/node-%3E%3D22-green)
+[![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/plugins/zhuosir/dsh-cron) ![许可证](https://img.shields.io/badge/license-MIT-blue) ![DSH](https://img.shields.io/badge/dsh-%3E%3D0.1.0--rc.6-blueviolet) ![Node](https://img.shields.io/badge/node-%3E%3D22-green)
 
 **English summary**: Scheduled tasks for DeepSeek Harness. Create tasks in chat with natural language ("every Monday 9am remind me…"), the agent converts them to `at` / `every` / `daily` / 5-field `cron` rules, fires them back into the session that created them, and replies with results in conversation. Ships a right-side drawer in the Web UI (task list + run history). MIT licensed, no install scripts, no network calls.
 
