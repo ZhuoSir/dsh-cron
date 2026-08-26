@@ -71,7 +71,7 @@ export const css = `
 /* mask + right drawer (rendered into shell.overlay, so fixed positioning is
    relative to the viewport and nothing in the header can clip it) */
 .dsh-cron-mask {
-  position: fixed; inset: 0; z-index: 900; background: rgba(0, 0, 0, .22);
+  position: fixed; inset: 0; z-index: 900; background: var(--dsw-alias-bg-mask-1, rgba(0, 0, 0, .22));
   opacity: 0; pointer-events: none; transition: opacity .18s ease;
 }
 .dsh-cron-maskOpen { opacity: 1; pointer-events: auto; }
@@ -127,12 +127,12 @@ export const css = `
 .dsh-cron-rowDisabled { opacity: .55; }
 .dsh-cron-rowHead { display: flex; align-items: center; gap: 6px; }
 .dsh-cron-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; }
-.dsh-cron-dotOn { background: #22c55e; }
-.dsh-cron-dotOff { background: #a3a3a3; }
-.dsh-cron-dotDelivered { background: #a3a3a3; }
-.dsh-cron-dotRunning { background: #3b82f6; }
-.dsh-cron-dotCompleted { background: #22c55e; }
-.dsh-cron-dotFailed { background: #ef4444; }
+.dsh-cron-dotOn { background: var(--dsw-alias-state-success-primary, #22c55e); }
+.dsh-cron-dotOff { background: var(--dsw-alias-label-caption, #a3a3a3); }
+.dsh-cron-dotDelivered { background: var(--dsw-alias-label-caption, #a3a3a3); }
+.dsh-cron-dotRunning { background: var(--dsw-alias-state-business-primary, #3b82f6); }
+.dsh-cron-dotCompleted { background: var(--dsw-alias-state-success-primary, #22c55e); }
+.dsh-cron-dotFailed { background: var(--dsw-alias-state-error-primary, #ef4444); }
 .dsh-cron-taskId { font-family: var(--dsw-font-mono, monospace); font-size: 12px; color: var(--dsw-alias-label-primary, #222); flex: 1; min-width: 0; word-break: break-all; }
 .dsh-cron-badge {
   flex: none; font-size: 10px; line-height: 16px; padding: 0 6px; border-radius: 5px;
@@ -150,7 +150,7 @@ export const css = `
   color: var(--dsw-alias-label-tertiary, #888);
 }
 .dsh-cron-action:hover { color: var(--dsw-alias-label-primary, #222); text-decoration: underline; }
-.dsh-cron-actionDanger:hover { color: #ef4444; }
+.dsh-cron-actionDanger:hover { color: var(--dsw-alias-state-error-primary, #ef4444); }
 .dsh-cron-addButton {
   margin: 4px; padding: 7px 0; border: 1px dashed var(--dsw-alias-border-l2, #ddd); border-radius: 8px;
   background: 0; cursor: pointer; font-size: 12px; color: var(--dsw-alias-label-tertiary, #888);
@@ -180,7 +180,7 @@ export const css = `
 .dsh-cron-form .dsh-cron-ghostButton { flex: 1; width: auto; }
 .dsh-cron-unreadBadge {
   position: absolute; top: -4px; right: -6px; min-width: 14px; height: 14px; padding: 0 3px;
-  border-radius: 7px; background: #ef4444; color: #fff; font-size: 9px; line-height: 14px;
+  border-radius: 7px; background: var(--dsw-alias-state-error-primary, #ef4444); color: #fff; font-size: 9px; line-height: 14px;
   text-align: center; font-variant-numeric: tabular-nums; box-sizing: border-box;
 }
 .dsh-cron-trigger { position: relative; }
@@ -190,13 +190,13 @@ export const css = `
 }
 .dsh-cron-toast {
   pointer-events: auto; width: 300px; max-width: 80vw; text-align: left; cursor: pointer;
-  border: 1px solid var(--dsw-alias-border-l2, #ddd); border-left: 3px solid #22c55e;
+  border: 1px solid var(--dsw-alias-border-l2, #ddd); border-left: 3px solid var(--dsw-alias-state-success-primary, #22c55e);
   background: var(--dsw-specific-menu, #fff); border-radius: 10px; padding: 10px 12px;
   box-shadow: var(--dsw-shadow-lv3, 0 8px 24px rgba(0,0,0,.14));
   display: flex; flex-direction: column; gap: 3px;
   animation: dsh-cron-toast-in .18s ease;
 }
-.dsh-cron-toastFailed { border-left-color: #ef4444; }
+.dsh-cron-toastFailed { border-left-color: var(--dsw-alias-state-error-primary, #ef4444); }
 .dsh-cron-toastTitle { font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-primary, #222); }
 .dsh-cron-toastBody {
   font-size: 11px; color: var(--dsw-alias-label-secondary, #666);
@@ -208,6 +208,6 @@ export const css = `
 }
 .dsh-cron-error {
   margin: 4px; padding: 6px 8px; border-radius: 6px; font-size: 11px;
-  background: rgba(239, 68, 68, .1); color: #ef4444;
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #ef4444) 10%, transparent); color: var(--dsw-alias-state-error-primary, #ef4444);
 }
 `
