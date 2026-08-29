@@ -14,6 +14,10 @@
         # Scheduler wake interval in seconds. Lower bounds how late a due
         # task can fire; 15s is a good default.
         tickSeconds: 15
+        # IANA time zone used by daily/cron tasks that omit timeZone.
+        defaultTimeZone: Asia/Shanghai
+        # Resume the exact bound Session when it is cold; never fall back.
+        coldWake: true
         # Native OS notification when a run finishes (macOS osascript / Linux
         # notify-send). Fires from the host process — works with no browser
         # open at all.

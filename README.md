@@ -1,5 +1,7 @@
 # dsh-cron
 
+> 此 fork 面向 DSH 0.1.1-rc.2 增加严格的既有 Session 自动化：绑定任务在 Session 冷却时恢复原 Session，绝不回退到其他 Session；支持 IANA 时区，并让 Session Header 抽屉只显示当前 Session 的任务和历史。
+
 > 定时任务插件：让 DeepSeek Harness 在指定时间自动执行任务——到点把任务提示注入会话，Agent 被唤醒后自动执行并在会话中回复结果。自带 Web 管理抽屉（任务列表 + 执行记录）。
 
 [![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/plugins/zhuosir/dsh-cron) ![许可证](https://img.shields.io/badge/license-MIT-blue) ![DSH](https://img.shields.io/badge/dsh-%3E%3D0.1.0--rc.6-blueviolet) ![Node](https://img.shields.io/badge/node-%3E%3D22-green)

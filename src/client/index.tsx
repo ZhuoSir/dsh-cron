@@ -31,6 +31,7 @@ interface ToastItem extends ToastEvent {
 }
 
 let drawerOpen = false
+let activeSessionId: string | null = null
 let enabledCount = 0
 let unreadCount = 0
 let drawerTab: DrawerTab = 'tasks'
@@ -73,8 +74,8 @@ function setPref<K extends keyof Prefs>(key: K, value: Prefs[K]) {
 
 // useSyncExternalStore requires a cached snapshot: returning a fresh object
 // from getSnapshot causes an infinite render loop.
-interface DrawerSnapshot { open: boolean; count: number; unread: number; tab: DrawerTab; toasts: ToastItem[]; prefs: Prefs }
-let snapshot: DrawerSnapshot = { open: drawerOpen, count: enabledCount, unread: unreadCount, tab: drawerTab, toasts, prefs }
+interface DrawerSnapshot { open: boolean; sessionId: string | null; count: number; unread: number; tab: DrawerTab; toasts: ToastItem[]; prefs: Prefs }
+let snapshot: DrawerSnapshot = { open: drawerOpen, sessionId: activeSessionId, count: enabledCount, unread: unreadCount, tab: drawerTab, toasts, prefs }
 const storeListeners = new Set<() => void>()
 
 function storeSubscribe(listener: () => void) {
@@ -83,8 +84,14 @@ function storeSubscribe(listener: () => void) {
 }
 
 function storeNotify() {
-  snapshot = { open: drawerOpen, count: enabledCount, unread: unreadCount, tab: drawerTab, toasts, prefs }
+  snapshot = { open: drawerOpen, sessionId: activeSessionId, count: enabledCount, unread: unreadCount, tab: drawerTab, toasts, prefs }
   for (const listener of storeListeners) listener()
+}
+
+function setActiveSession(sessionId: string) {
+  activeSessionId = sessionId
+  enabledCount = 0
+  storeNotify()
 }
 
 function setDrawerOpen(open: boolean) {
@@ -139,7 +146,7 @@ function useDrawerState() {
 interface TaskView {
   id: string
   prompt: string
-  schedule: { at?: string; everySeconds?: number; daily?: string; cron?: string }
+  schedule: { at?: string; everySeconds?: number; daily?: string; cron?: string; timeZone?: string }
   enabled: boolean
   origin: 'config' | 'dynamic'
   sessionId: string | null
@@ -150,6 +157,7 @@ interface TaskView {
 interface RunRecord {
   id: string
   taskId: string
+  sessionId?: string | null
   prompt: string
   scheduledFor: string
   firedAt: string
@@ -329,8 +337,8 @@ function scheduleText(task: TaskView, t: T): string {
     if (seconds % 60 === 0) return t('schedule.every.minutes', { count: seconds / 60 })
     return t('schedule.every.seconds', { count: seconds })
   }
-  if (task.schedule.daily) return t('schedule.daily', { time: task.schedule.daily })
-  if (task.schedule.cron) return t('schedule.cron', { expr: task.schedule.cron })
+  if (task.schedule.daily) return t('schedule.daily', { time: task.schedule.daily, zone: task.schedule.timeZone ?? '' })
+  if (task.schedule.cron) return t('schedule.cron', { expr: task.schedule.cron, zone: task.schedule.timeZone ?? '' })
   return ''
 }
 
@@ -434,7 +442,7 @@ function EditTaskForm({ t, task, onDone }: { t: T; task: TaskView; onDone: () =>
   )
 }
 
-function CronPanel({ t, tab, setTab }: { t: T; tab: DrawerTab; setTab: (tab: DrawerTab) => void }) {
+function CronPanel({ t, tab, setTab, sessionId }: { t: T; tab: DrawerTab; setTab: (tab: DrawerTab) => void; sessionId: string }) {
   const [tasks, setTasks] = useState<TaskView[]>([])
   const [records, setRecords] = useState<RunRecord[]>([])
   const [error, setError] = useState('')
@@ -443,8 +451,8 @@ function CronPanel({ t, tab, setTab }: { t: T; tab: DrawerTab; setTab: (tab: Dra
   const refresh = useCallback(async () => {
     try {
       const [listResult, historyResult] = await Promise.all([
-        api<{ tasks: TaskView[] }>('list'),
-        api<{ records: RunRecord[] }>('history', { limit: 50 }),
+        api<{ tasks: TaskView[] }>('list', { sessionId }),
+        api<{ records: RunRecord[] }>('history', { limit: 50, sessionId }),
       ])
       setTasks(listResult.tasks)
       setRecords(historyResult.records)
@@ -453,7 +461,7 @@ function CronPanel({ t, tab, setTab }: { t: T; tab: DrawerTab; setTab: (tab: Dra
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
-  }, [])
+  }, [sessionId])
 
   useEffect(() => {
     void refresh()
@@ -566,11 +574,12 @@ function CronPanel({ t, tab, setTab }: { t: T; tab: DrawerTab; setTab: (tab: Dra
 
 interface SlotProps {
   t?: T
+  sessionId?: string
 }
 
 function CronDrawer({ t }: SlotProps) {
   const tr = t ?? fallbackT
-  const { open, tab, toasts, prefs: currentPrefs } = useDrawerState()
+  const { open, sessionId, tab, toasts, prefs: currentPrefs } = useDrawerState()
   useCronWatcher()
 
   // Escape closes the drawer while it is open.
@@ -658,7 +667,7 @@ function CronDrawer({ t }: SlotProps) {
             {tr('drawer.close')}
           </button>
         </div>
-        <CronPanel t={tr} tab={tab} setTab={setDrawerTab} />
+        {sessionId ? <CronPanel t={tr} tab={tab} setTab={setDrawerTab} sessionId={sessionId} /> : null}
       </aside>
       {// Toasts must outrank every plugin overlay: the shell.overlay layer is
       // only z-index 20, so portal the stack to <body> with a topmost z-index
@@ -677,7 +686,7 @@ function CronDrawer({ t }: SlotProps) {
 
 // --- header trigger (conversation.session.header.utilities entry) -----------------
 
-function CronAction({ t }: SlotProps) {
+function CronAction({ t, sessionId }: SlotProps) {
   const tr = t ?? fallbackT
   const { open, count, unread } = useDrawerState()
 
@@ -688,7 +697,10 @@ function CronAction({ t }: SlotProps) {
       aria-expanded={open}
       aria-label={tr('trigger.aria')}
       title={tr('trigger.aria')}
-      onClick={() => setDrawerOpen(!open)}
+      onClick={() => {
+        if (sessionId) setActiveSession(sessionId)
+        setDrawerOpen(!open || activeSessionId !== sessionId)
+      }}
     >
       <span className={styles.triggerLabel}>{tr('trigger.aria')}</span>
       {count > 0 ? <span className={styles.count}>{count}</span> : null}
@@ -716,6 +728,7 @@ export function apply(ctx: any) {
       id: 'cron-trigger',
       order: -50,
       locale: 'cron',
+      inject: (sessionId: string) => ({ sessionId }),
     }, CronAction))
   ctx.slots.inject('shell.overlay', () =>
     ctx.slots.register({

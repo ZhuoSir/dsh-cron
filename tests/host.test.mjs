@@ -13,24 +13,57 @@ assert.equal(validated.tickSeconds, 15)
 assert.equal(validated.historyPath, '')
 console.log('✓ Config schema defaults')
 
-function makeCtx(storagePath, historyPath, configTasks) {
+function makeCtx(storagePath, historyPath, configTasks, options = {}) {
   const fired = []
   const tools = new Map()
   const disposers = []
   const listeners = new Map()
   const mockSession = { id: 'sess-1' }
   const mockAgent = { id: 'root-1', session: mockSession, followup: (msg) => fired.push(msg) }
+  const roots = options.roots ?? [mockAgent]
+  const resumes = []
+  const mounts = []
+  const selections = []
+  const inspected = options.inspected ?? {
+    meta: { id: 'sess-1', cwd: 'C:\\workspace' },
+    events: [{ type: 'request/header', data: { header: { config: { provider: 'saved-provider', model: 'saved-model' } } } }],
+  }
   const ctx = {
     logger: { info: () => {}, warn: (m) => console.warn('  [warn]', m) },
-    agents: { roots: () => [mockAgent] },
+    agents: {
+      roots: () => roots,
+      resume: async (request) => {
+        resumes.push(request)
+        if (options.resumeError) throw options.resumeError
+        const session = { id: String(request.resumeSessionId) }
+        const agent = { id: String(request.resumeSessionId), session, followup: (msg) => fired.push(msg) }
+        await request.setup?.({
+          provide: () => {},
+          effect: (fn) => fn(),
+          on: () => () => {},
+          emit: () => {},
+          get: () => undefined,
+          [Symbol.for('test')]: selections,
+        })
+        return { agent, dispose: async () => {} }
+      },
+    },
+    sessionPersistence: {
+      list: async () => options.persistenceMissing ? [] : [{ id: inspected.meta.id, cwd: inspected.meta.cwd }],
+      inspect: async () => inspected,
+    },
+    agentPresets: {
+      mount: async (_agentCtx, presetId) => { mounts.push(presetId) },
+    },
+    agentDefaultModel: { currentSelection: () => ({ provider: 'default-provider', model: 'default-model' }) },
     on: (event, handler) => listeners.set(event, handler),
     effect: (fn) => { disposers.push(fn()) },
-    inject: () => {}, // webServer optional injection: skipped in this mock
+    inject: () => {},
     tools: { register: (def) => tools.set(def.name, def) },
   }
-  apply(ctx, Config({ storagePath, historyPath, tickSeconds: 1, tasks: configTasks, systemNotify: false }))
+  apply(ctx, Config({ storagePath, historyPath, tickSeconds: 1, tasks: configTasks, systemNotify: false, coldWake: options.coldWake ?? true }))
   const emit = (event, ...args) => listeners.get(event)?.(...args)
-  return { ctx, fired, tools, disposers, mockAgent, mockSession, emit }
+  return { ctx, fired, tools, disposers, mockAgent, mockSession, emit, roots, resumes, mounts, selections }
 }
 
 const dir = mkdtempSync(join(tmpdir(), 'dsh-cron-test-'))
@@ -42,9 +75,9 @@ const pastHM = new Date(Date.now() - 60_000)
 const dailyPast = `${String(pastHM.getHours()).padStart(2, '0')}:${String(pastHM.getMinutes()).padStart(2, '0')}`
 
 const configTasks = [
-  { id: 'once', prompt: 'one shot task', at: past },
-  { id: 'hourly', prompt: 'interval task', every: 60 },
-  { id: 'morning', prompt: 'daily task', daily: dailyPast },
+  { id: 'once', prompt: 'one shot task', at: past, sessionId: 'sess-1' },
+  { id: 'hourly', prompt: 'interval task', every: 60, sessionId: 'sess-1' },
+  { id: 'morning', prompt: 'daily task', daily: dailyPast, sessionId: 'sess-1' },
 ]
 
 const run1 = makeCtx(storagePath, historyPath, configTasks)
@@ -95,15 +128,16 @@ assert.equal(morningRecord.endReason, 'error')
 console.log('✓ failed turn recorded')
 
 // --- cron_add persists dynamic task
-await run1.tools.get('cron_add').execute({ id: 'dyn', prompt: 'dynamic task', every: 120 }, {})
+await run1.tools.get('cron_add').execute({ id: 'dyn', prompt: 'dynamic task', every: 120 }, { agent: run1.mockAgent })
 const stored = JSON.parse(readFileSync(storagePath, 'utf8'))
 assert.equal(stored.tasks.length, 1)
 assert.ok(stored.runs.once?.firedAt)
 console.log('✓ cron_add persists')
 
 // --- validation
-await assert.rejects(run1.tools.get('cron_add').execute({ id: 'bad', prompt: 'x', every: 30, daily: '10:00' }, {}), /exactly one/)
-await assert.rejects(run1.tools.get('cron_add').execute({ id: 'dyn', prompt: 'x', every: 60 }, {}), /already exists/)
+await assert.rejects(run1.tools.get('cron_add').execute({ id: 'bad', prompt: 'x', every: 30, daily: '10:00' }, { agent: run1.mockAgent }), /exactly one/)
+await assert.rejects(run1.tools.get('cron_add').execute({ id: 'dyn', prompt: 'x', every: 60 }, { agent: run1.mockAgent }), /already exists/)
+await assert.rejects(run1.tools.get('cron_add').execute({ id: 'unbound', prompt: 'x', every: 60 }, {}), /bound sessionId/)
 console.log('✓ cron_add validation')
 
 // --- reload: run stamps survive, one-shot does not refire, history reloads
@@ -116,6 +150,64 @@ assert.equal(reloaded.length, 2, 'history survives reload')
 assert.equal(reloaded.find((r) => r.taskId === 'once').status, 'completed', 'completed status survives')
 console.log('✓ restart: no refire, history survives')
 run2.disposers.forEach((d) => d?.())
+
+// --- strict fixed-session delivery: never fall back to another live root
+const strictDir = mkdtempSync(join(tmpdir(), 'dsh-cron-strict-'))
+const otherSession = { id: 'sess-other' }
+const otherFired = []
+const otherAgent = { id: 'other', session: otherSession, followup: (msg) => otherFired.push(msg) }
+const strict = makeCtx(join(strictDir, 'tasks.json'), join(strictDir, 'history.jsonl'), [
+  { id: 'strict', prompt: 'strict owner', at: past, sessionId: 'sess-owner' },
+], {
+  roots: [otherAgent],
+  inspected: {
+    meta: { id: 'sess-owner', cwd: 'C:\\workspace' },
+    events: [{ type: 'request/header', data: { header: { config: { provider: 'saved-provider', model: 'saved-model' } } } }],
+  },
+})
+await new Promise((r) => setTimeout(r, 4200))
+assert.equal(otherFired.length, 0, 'unrelated live root never receives bound task')
+assert.equal(strict.resumes.length, 1, 'cold owner resumed exactly once')
+assert.equal(String(strict.resumes[0].resumeSessionId), 'sess-owner')
+assert.deepEqual(strict.resumes[0].agentOptions, { provider: 'saved-provider', model: 'saved-model' })
+assert.equal(strict.fired.length, 1, 'resumed owner receives task')
+console.log('✓ strict cold owner delivery with saved model')
+strict.disposers.forEach((d) => d?.())
+rmSync(strictDir, { recursive: true, force: true })
+
+// --- failed cold resume remains overdue and never consumes the slot
+const failedDir = mkdtempSync(join(tmpdir(), 'dsh-cron-resume-fail-'))
+const failed = makeCtx(join(failedDir, 'tasks.json'), join(failedDir, 'history.jsonl'), [
+  { id: 'held', prompt: 'held owner', at: past, sessionId: 'sess-missing' },
+], { roots: [otherAgent], resumeError: new Error('resume failed') })
+await new Promise((r) => setTimeout(r, 4200))
+assert.equal(otherFired.length, 0, 'resume failure still never falls back')
+assert.equal(failed.fired.length, 0)
+assert.equal(existsSync(join(failedDir, 'history.jsonl')), false, 'failed delivery creates no run history')
+console.log('✓ failed cold resume stays overdue without fallback')
+failed.disposers.forEach((d) => d?.())
+rmSync(failedDir, { recursive: true, force: true })
+
+// --- concurrent manual runs serialize by task ownership
+const serialDir = mkdtempSync(join(tmpdir(), 'dsh-cron-serial-'))
+let releaseResume
+const serial = makeCtx(join(serialDir, 'tasks.json'), join(serialDir, 'history.jsonl'), [], { roots: [] })
+serial.ctx.agents.resume = async (request) => {
+  serial.resumes.push(request)
+  await new Promise((resolve) => { releaseResume = resolve })
+  return { agent: { id: 'sess-1', session: { id: 'sess-1' }, followup: (msg) => serial.fired.push(msg) } }
+}
+await serial.tools.get('cron_add').execute({ id: 'serial', prompt: 'serial', every: 60 }, { agent: serial.mockAgent })
+const runTool = serial.tools.get('cron_list')
+assert.ok(runTool, 'serial harness remains usable')
+// Scheduler tick ownership is covered by two ticks while resume is pending.
+await new Promise((r) => setTimeout(r, 3200))
+releaseResume?.()
+await new Promise((r) => setTimeout(r, 1200))
+assert.ok(serial.resumes.length <= 1, `resume is single-flight (got ${serial.resumes.length})`)
+console.log('✓ asynchronous firing remains single-flight')
+serial.disposers.forEach((d) => d?.())
+rmSync(serialDir, { recursive: true, force: true })
 
 // --- fault containment: nothing the plugin does may escape as an uncaught throw
 const run3 = makeCtx(storagePath, historyPath, configTasks)

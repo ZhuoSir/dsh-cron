@@ -17,6 +17,7 @@ const req = (n) => {
     }
   }
   if (n === 'react/jsx-runtime') return { jsx: () => ({}), jsxs: () => ({}), Fragment: {} }
+  if (n === 'react-dom') return { createPortal: (node) => node }
   throw new Error('unexpected require: ' + n)
 }
 

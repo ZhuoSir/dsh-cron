@@ -27,6 +27,7 @@ const reg = registrations[0]
 const plugin = reg.factory((name) => {
   if (name === 'react') return react
   if (name === 'react/jsx-runtime') return jsxRuntime
+  if (name === 'react-dom') return { createPortal: (node) => node }
   throw new Error('unexpected require: ' + name)
 })
 
