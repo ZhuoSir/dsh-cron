@@ -1,6 +1,6 @@
 # dsh-cron
 
-> 此 fork 面向 DSH 0.1.1-rc.2 增加严格的既有 Session 自动化：绑定任务在 Session 冷却时恢复原 Session，绝不回退到其他 Session；支持 IANA 时区，并让 Session Header 抽屉只显示当前 Session 的任务和历史。
+> 此 fork 面向 DSH 0.1.1-rc.2 及本地 Core 0.1.2-alpha.1 增加严格的既有 Session 自动化：绑定任务在 Session 冷却时恢复原 Session，绝不回退到其他 Session；支持 IANA 时区，并让 Session Header 抽屉只显示当前 Session 的任务和历史。
 
 > 定时任务插件：让 DeepSeek Harness 在指定时间自动执行任务——到点把任务提示注入会话，Agent 被唤醒后自动执行并在会话中回复结果。自带 Web 管理抽屉（任务列表 + 执行记录）。
 
@@ -112,7 +112,7 @@ HTTP API 通过可选注入挂载（`ctx.inject(['webServer','webRuntime'])`）�
 
 | 项目 | 要求 |
 |---|---|
-| DeepSeek Harness | `>= 0.1.0-rc.6`（在 `0.1.0-rc.7` / `rc.8` 上实测） |
+| DeepSeek Harness | `0.1.1-rc.2` 或本地 Core `0.1.2-alpha.1` |
 | Node.js | `>= 22`（跟随 DSH 的运行要求） |
 | 平台 | macOS 已实测（含原生通知）；Linux 预期可用（通知需 `notify-send`）；Windows 调度/面板可用但无原生通知 |
 | 浏览器 | 跟随 DSH Web 壳（现代浏览器，React 18 运行时由壳提供） |

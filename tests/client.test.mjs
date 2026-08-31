@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs'
 
 const src = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
+const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 const regs = []
 globalThis.window = { __ModuleLoader__: { load: (r) => regs.push(r) } }
 eval(src)
@@ -38,4 +39,8 @@ console.log('✓ registrations:', registered.join(' | '))
 
 if (!registered.includes('conversation.session.header.utilities#cron-trigger@order-50')) throw new Error('trigger registration missing')
 if (!registered.includes('shell.overlay#cron-drawer@order100')) throw new Error('drawer registration missing')
+if (!ex.inject.includes('slots')) throw new Error('slots service injection missing')
+if (!ex.inject.includes('locale')) throw new Error('locale service injection missing')
+if (!manifest.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-layout')) throw new Error('current layout client module missing')
+if (manifest.dsh.client.inject.includes('@deepseek-ai/dsh-client-runtime')) throw new Error('removed legacy client runtime still referenced')
 console.log('\nCLIENT BUNDLE OK')

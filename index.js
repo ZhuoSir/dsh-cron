@@ -21,7 +21,6 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import Schema from '@deepseek-ai/schemastery'
-import { resolveSessionPreset } from '@deepseek-ai/dsh-agent-presets'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
@@ -692,6 +691,20 @@ export function apply(ctx, config) {
     return null
   }
 
+  /** Current preset projection used by modern Core session reconstruction. */
+  function currentSessionPreset(meta, events) {
+    let preset = typeof meta?.agentPreset === 'string' && meta.agentPreset !== ''
+      ? meta.agentPreset
+      : undefined
+    for (const event of events) {
+      const selected = event?.type === 'agent-preset/selected'
+        ? event.data?.agentPreset
+        : undefined
+      if (typeof selected === 'string' && selected !== '') preset = selected
+    }
+    return preset
+  }
+
   /** One in-flight resume per Session prevents duplicate cold agents. */
   const resumes = new Map()
 
@@ -710,7 +723,7 @@ export function apply(ctx, config) {
         return null
       }
       const events = [...inspected.events]
-      const presetId = resolveSessionPreset({ header: inspected.meta, events })
+      const presetId = currentSessionPreset(inspected.meta, events)
       const recorded = lastRequestConfig(events)
       const fallback = ctx.agentDefaultModel.currentSelection()
       const selection = recorded ?? { provider: fallback.provider, model: fallback.model }
