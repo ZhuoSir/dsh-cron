@@ -25,8 +25,11 @@ function makeCtx(storagePath, historyPath, configTasks, options = {}) {
   const mounts = []
   const selections = []
   const inspected = options.inspected ?? {
-    meta: { id: 'sess-1', cwd: 'C:\\workspace' },
-    events: [{ type: 'request/header', data: { header: { config: { provider: 'saved-provider', model: 'saved-model' } } } }],
+    meta: { id: 'sess-1', cwd: 'C:\\workspace', agentPreset: 'standard' },
+    events: [
+      { type: 'request/header', data: { header: { config: { provider: 'saved-provider', model: 'saved-model' } } } },
+      { type: 'agent-preset/selected', data: { agentPreset: 'coding' } },
+    ],
   }
   const ctx = {
     logger: { info: () => {}, warn: (m) => console.warn('  [warn]', m) },
@@ -61,7 +64,15 @@ function makeCtx(storagePath, historyPath, configTasks, options = {}) {
     inject: () => {},
     tools: { register: (def) => tools.set(def.name, def) },
   }
-  apply(ctx, Config({ storagePath, historyPath, tickSeconds: 1, tasks: configTasks, systemNotify: false, coldWake: options.coldWake ?? true }))
+  apply(ctx, Config({
+    storagePath,
+    historyPath,
+    tickSeconds: 1,
+    defaultTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    tasks: configTasks,
+    systemNotify: false,
+    coldWake: options.coldWake ?? true,
+  }))
   const emit = (event, ...args) => listeners.get(event)?.(...args)
   return { ctx, fired, tools, disposers, mockAgent, mockSession, emit, roots, resumes, mounts, selections }
 }
@@ -161,8 +172,11 @@ const strict = makeCtx(join(strictDir, 'tasks.json'), join(strictDir, 'history.j
 ], {
   roots: [otherAgent],
   inspected: {
-    meta: { id: 'sess-owner', cwd: 'C:\\workspace' },
-    events: [{ type: 'request/header', data: { header: { config: { provider: 'saved-provider', model: 'saved-model' } } } }],
+    meta: { id: 'sess-owner', cwd: 'C:\\workspace', agentPreset: 'standard' },
+    events: [
+      { type: 'request/header', data: { header: { config: { provider: 'saved-provider', model: 'saved-model' } } } },
+      { type: 'agent-preset/selected', data: { agentPreset: 'coding' } },
+    ],
   },
 })
 await new Promise((r) => setTimeout(r, 4200))
@@ -170,6 +184,7 @@ assert.equal(otherFired.length, 0, 'unrelated live root never receives bound tas
 assert.equal(strict.resumes.length, 1, 'cold owner resumed exactly once')
 assert.equal(String(strict.resumes[0].resumeSessionId), 'sess-owner')
 assert.deepEqual(strict.resumes[0].agentOptions, { provider: 'saved-provider', model: 'saved-model' })
+assert.deepEqual(strict.mounts, ['coding'], 'latest persisted preset projection is mounted')
 assert.equal(strict.fired.length, 1, 'resumed owner receives task')
 console.log('✓ strict cold owner delivery with saved model')
 strict.disposers.forEach((d) => d?.())
