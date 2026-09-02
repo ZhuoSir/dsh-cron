@@ -1,6 +1,6 @@
 # dsh-cron
 
-> 此 fork 面向 DSH 0.1.1-rc.2 及本地 Core 0.1.2-alpha.1 增加严格的既有 Session 自动化：绑定任务在 Session 冷却时恢复原 Session，绝不回退到其他 Session；支持 IANA 时区，并让 Session Header 抽屉只显示当前 Session 的任务和历史。
+> 此 fork 面向 DSH 0.1.1-rc.2 及 Core 0.1.2-alpha.4 / alpha.5 提供严格的既有 Session 自动化：绑定任务在 Session 冷却时恢复原 Session，绝不回退到其他 Session；支持 IANA 时区，并让 Session Header 抽屉只显示当前 Session 的任务和历史。
 
 > 定时任务插件：让 DeepSeek Harness 在指定时间自动执行任务——到点把任务提示注入会话，Agent 被唤醒后自动执行并在会话中回复结果。自带 Web 管理抽屉（任务列表 + 执行记录）。
 
@@ -19,16 +19,16 @@
 **从 GitHub 安装（推荐，锁定 tag 或 commit 更安全）**：
 
 ```sh
-dsh plugin --profile web add github:ZhuoSir/dsh-cron
-# 或锁定版本：
-dsh plugin --profile web add github:ZhuoSir/dsh-cron#v0.2.0
+dsh plugin --profile web add github:cloga/dsh-cron
+# 或锁定已验证版本：
+dsh plugin --profile web add github:cloga/dsh-cron#v0.3.2
 ```
 
 **本地 / tarball 安装**：
 
 ```sh
 dsh plugin --profile web add ./dsh-cron            # 本地目录（开发用 link）
-dsh plugin --profile web add ./dsh-cron-0.2.0.tgz  # pnpm pack 产物
+dsh plugin --profile web add ./dsh-cron-0.3.2.tgz  # pnpm pack 产物
 ```
 
 **验证与卸载**：
@@ -44,10 +44,10 @@ dsh plugin --profile web remove dsh-cron
 
 | Profile | 支持情况 |
 |---|---|
-| **web**（`dsh web`） | ✅ 完整功能：调度 + 工具 + 管理抽屉 + 执行记录 |
-| **headless**（`dsh` 一次性运行） | ✅ 调度 + 模型工具完整可用；❌ 无 Web 面板（无 webServer，属预期） |
+| **web**（`dsh web` / Desktop Web profile） | ✅ 完整功能：调度 + 工具 + 管理抽屉 + 执行记录 |
+| **headless**（`dsh` 一次性运行） | ❌ 不支持持久调度；0.1.2 headless 组合不挂载 `agentPresets`，且一次性进程会在当前任务结束后退出 |
 
-HTTP API 通过可选注入挂载（`ctx.inject(['webServer','webRuntime'])`），没有 Web 栈的环境不会报错，只是没有面板。
+HTTP API 通过可选注入挂载（`ctx.inject(['webServer','webRuntime'])`）。不过 Host 调度器本身还依赖常驻进程和 Web profile 提供的 Agent Preset 服务，所以“没有 Web 面板”不等于 headless 可以在未来定时执行。
 
 ## 用法
 
@@ -106,13 +106,13 @@ HTTP API 通过可选注入挂载（`ctx.inject(['webServer','webRuntime'])`）�
 | **安装脚本** | ❌ 无 `prepare`/`postinstall` 等任何安装期脚本 | 无（GitHub 安装不需要构建授权） |
 | **Shell / 系统命令** | ⚠️ 仅用于系统通知：macOS 调 `osascript -e 'display notification …'`、Linux 调 `notify-send`；可用 `systemNotify: false` 完全关闭 | 低；命令固定无注入面（参数经 JSON 转义） |
 
-可靠性设计：任务运行记录持久化（重启不重发）、`daily` 错过补发一次、所有回调入口有防崩溃包裹（插件故障不会拖垮宿主进程）、会话绑定失效自动回退并记日志。
+可靠性设计：任务运行记录持久化（重启不重发）、`daily` 错过补发一次、所有回调入口有防崩溃包裹（插件故障不会拖垮宿主进程）。会话绑定严格固定：目标 Session 无法恢复时保留逾期任务并在后续 tick 重试，绝不投递到其他 Session。
 
 ## 兼容性
 
 | 项目 | 要求 |
 |---|---|
-| DeepSeek Harness | `0.1.1-rc.2` 或本地 Core `0.1.2-alpha.1` |
+| DeepSeek Harness | `0.1.1-rc.2`；Web profile `0.1.2-alpha.4` 已做本地 Core smoke，`alpha.5` 已做上游 API 差异审计；peer range 明确排除尚未发布和验证的 `0.1.2` stable |
 | Node.js | `>= 22`（跟随 DSH 的运行要求） |
 | 平台 | macOS 已实测（含原生通知）；Linux 预期可用（通知需 `notify-send`）；Windows 调度/面板可用但无原生通知 |
 | 浏览器 | 跟随 DSH Web 壳（现代浏览器，React 18 运行时由壳提供） |
@@ -133,8 +133,11 @@ HTTP API 通过可选注入挂载（`ctx.inject(['webServer','webRuntime'])`）�
 pnpm install
 pnpm build        # 产出 lib/client.js（__ModuleLoader__ 格式；改 client 半后必须重新提交该产物）
 pnpm typecheck
-pnpm test         # host 半 mock 测试 + client bundle 验证
+pnpm test         # host 行为 mock + client bundle/DOM + 静态兼容边界
+DSH_CORE_PATH=/path/to/dsh pnpm test:core  # 检查目标 Core 暴露的运行时兼容表面
 ```
+
+npm registry 尚未发布 0.1.2 alpha 的独立包，因此普通开发依赖仍锁定最新公开的 `0.1.1-rc.2`。发布前额外设置 `DSH_CORE_PATH`：`test:core` 会从目标安装读取版本，确认插件依赖的 Agent/Preset/Persistence 方法、事件词汇、Client 注入包和 Slot catalog 仍存在；Host 调用参数与 Client 实际注册/交互分别由 `host.test.mjs`、`client.test.mjs`、`toast-render.test.mjs` 和浏览器 smoke 覆盖。
 
 **结构**：单 npm 包、host/client 双半——host（`index.js`）：调度器 + 工具 + `/cron/api` 路由 + 历史采集；client（`src/client/` → `lib/client.js`）：会话头部按钮 + 右侧抽屉。
 
@@ -144,4 +147,4 @@ pnpm test         # host 半 mock 测试 + client bundle 验证
 
 ---
 
-**反馈与问题**：[GitHub Issues](https://github.com/ZhuoSir/dsh-cron/issues)
+**反馈与问题**：[GitHub Issues](https://github.com/cloga/dsh-cron/issues)

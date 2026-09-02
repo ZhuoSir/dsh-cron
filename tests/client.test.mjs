@@ -43,4 +43,5 @@ if (!ex.inject.includes('slots')) throw new Error('slots service injection missi
 if (!ex.inject.includes('locale')) throw new Error('locale service injection missing')
 if (!manifest.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-layout')) throw new Error('current layout client module missing')
 if (manifest.dsh.client.inject.includes('@deepseek-ai/dsh-client-runtime')) throw new Error('removed legacy client runtime still referenced')
+if (manifest.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-primitives')) throw new Error('removed 0.1.2 client primitives package still referenced')
 console.log('\nCLIENT BUNDLE OK')
