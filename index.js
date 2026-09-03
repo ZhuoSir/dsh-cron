@@ -885,6 +885,21 @@ export function apply(ctx, config) {
   const RULE_KEYS = ['at', 'every', 'daily', 'cron']
 
   /**
+   * Some strict tool-call transports materialize omitted optional fields as
+   * empty strings and the omitted numeric `every` field as zero. Strip those
+   * transport placeholders at the model-tool boundary; the HTTP API keeps its
+   * original strict validation semantics.
+   */
+  function normalizeToolScheduleArgs(args) {
+    const normalized = { ...args }
+    for (const key of ['at', 'daily', 'cron', 'timeZone']) {
+      if (typeof normalized[key] === 'string' && normalized[key].trim() === '') delete normalized[key]
+    }
+    if (normalized.every === 0) delete normalized.every
+    return normalized
+  }
+
+  /**
    * Edit a dynamic task. Prompt updates in place; when any schedule rule key
    * is present in the patch the whole schedule is replaced (the other rules
    * are cleared) and the run stamps reset so the new rule takes effect now.
@@ -978,7 +993,7 @@ export function apply(ctx, config) {
     },
     async execute(args, exec) {
       // Bind to the calling session: the task's runs reply in this window.
-      const view = addDynamicTask(args, exec?.agent?.session?.id)
+      const view = addDynamicTask(normalizeToolScheduleArgs(args), exec?.agent?.session?.id)
       return `Task "${view.id}" added. Next run: ${view.nextRunAt}`
     },
   }))
@@ -1000,7 +1015,8 @@ export function apply(ctx, config) {
       render: (_args, value) => [{ type: 'text', text: value }],
     },
     async execute(args) {
-      const view = updateDynamicTask(args.id, args)
+      const patch = normalizeToolScheduleArgs(args)
+      const view = updateDynamicTask(patch.id, patch)
       return `Task "${view.id}" updated. Next run: ${view.nextRunAt}`
     },
   }))

@@ -145,6 +145,24 @@ assert.equal(stored.tasks.length, 1)
 assert.ok(stored.runs.once?.firedAt)
 console.log('✓ cron_add persists')
 
+// --- strict tool transports may materialize omitted optionals as "" / 0
+const strictArgs = {
+  id: 'strict-args', prompt: 'strict transport', at: '', every: 0,
+  daily: '08:00', cron: '', timeZone: 'UTC',
+}
+await run1.tools.get('cron_add').execute(strictArgs, { agent: run1.mockAgent })
+let strictTask = JSON.parse(await run1.tools.get('cron_list').execute({}, {})).find((task) => task.id === 'strict-args')
+assert.equal(strictTask.schedule.daily, '08:00')
+assert.equal(strictTask.schedule.everySeconds, undefined)
+await run1.tools.get('cron_update').execute({
+  id: 'strict-args', prompt: '', at: '', every: 0,
+  daily: '', cron: '0 9 * * *', timeZone: 'UTC',
+})
+strictTask = JSON.parse(await run1.tools.get('cron_list').execute({}, {})).find((task) => task.id === 'strict-args')
+assert.equal(strictTask.schedule.cron, '0 9 * * *')
+assert.equal(strictTask.schedule.daily, undefined)
+console.log('✓ strict tool-call placeholders are ignored')
+
 // --- validation
 await assert.rejects(run1.tools.get('cron_add').execute({ id: 'bad', prompt: 'x', every: 30, daily: '10:00' }, { agent: run1.mockAgent }), /exactly one/)
 await assert.rejects(run1.tools.get('cron_add').execute({ id: 'dyn', prompt: 'x', every: 60 }, { agent: run1.mockAgent }), /already exists/)
