@@ -21,14 +21,14 @@
 ```sh
 dsh plugin --profile web add github:cloga/dsh-cron
 # 或锁定已验证版本：
-dsh plugin --profile web add github:cloga/dsh-cron#v0.3.2
+dsh plugin --profile web add github:cloga/dsh-cron#v0.3.3
 ```
 
 **本地 / tarball 安装**：
 
 ```sh
 dsh plugin --profile web add ./dsh-cron            # 本地目录（开发用 link）
-dsh plugin --profile web add ./dsh-cron-0.3.2.tgz  # pnpm pack 产物
+dsh plugin --profile web add ./dsh-cron-0.3.3.tgz  # pnpm pack 产物
 ```
 
 **验证与卸载**：
@@ -38,7 +38,7 @@ dsh --profile web --dump-config   # 应能看到 "# == dsh-cron" 配置层
 dsh plugin --profile web remove dsh-cron
 ```
 
-安装后**重启 `dsh web` 并硬刷新浏览器**（Cmd/Ctrl+Shift+R）。仓库已提交 client 半构建产物（`lib/client.js`），因此 GitHub 安装**不需要任何构建授权**（无 `prepare` 脚本，pnpm ≥10 的 `allowBuilds` 授权与此插件无关）。
+安装后需在**没有其他运行中 Session** 时重启 `dsh web`，再硬刷新浏览器（Cmd/Ctrl+Shift+R）；有其他 Session 时先保持“已安装、待激活”，不要为插件安装中断 Host。仓库已提交 client 半构建产物（`lib/client.js`），因此 GitHub 安装**不需要任何构建授权**（无 `prepare` 脚本，pnpm ≥10 的 `allowBuilds` 授权与此插件无关）。
 
 ## 支持的 profile
 
@@ -116,6 +116,7 @@ HTTP API 通过可选注入挂载（`ctx.inject(['webServer','webRuntime'])`）�
 | Node.js | `>= 22`（跟随 DSH 的运行要求） |
 | 平台 | macOS 已实测（含原生通知）；Linux 预期可用（通知需 `notify-send`）；Windows 调度/面板可用但无原生通知 |
 | 浏览器 | 跟随 DSH Web 壳（现代浏览器，React 18 运行时由壳提供） |
+| 主题 | 使用当前公开的 DSH background / label / border / state tokens；亮色和暗色均经过浏览器验证，token 缺失时回退到 `color-scheme` 感知的系统色 |
 | pnpm | 仅开发构建需要 `>= 10`；**安装使用不需要** |
 
 与其他插件共存：无已知冲突；会话头部使用 `order: -50` 与 dsh-session-manager 的按钮（-40/-30/-10）相邻。

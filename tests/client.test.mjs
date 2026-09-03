@@ -44,4 +44,17 @@ if (!ex.inject.includes('locale')) throw new Error('locale service injection mis
 if (!manifest.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-layout')) throw new Error('current layout client module missing')
 if (manifest.dsh.client.inject.includes('@deepseek-ai/dsh-client-runtime')) throw new Error('removed legacy client runtime still referenced')
 if (manifest.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-primitives')) throw new Error('removed 0.1.2 client primitives package still referenced')
+for (const token of ['--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2', '--dsw-alias-bg-overlay', '--dsw-alias-label-primary', '--dsw-alias-label-secondary', '--dsw-alias-border-l2']) {
+  if (!src.includes(token)) throw new Error(`current theme token missing: ${token}`)
+}
+for (const legacy of ['--dsw-alias-fill-', '--dsw-specific-menu', '--dsw-alias-label-tertiary', '--dsw-alias-label-caption', '--dsw-alias-state-business-primary', '--dsw-alias-bg-mask-1']) {
+  if (src.includes(legacy)) throw new Error(`legacy theme token remains: ${legacy}`)
+}
+for (const lightOnlyFallback of ['#f2f2f2', '#f5f5f5', '#eeeeee', '#e5e5e5']) {
+  if (src.toLowerCase().includes(lightOnlyFallback)) throw new Error(`light-only fallback remains: ${lightOnlyFallback}`)
+}
+if (src.includes('color-scheme:light dark') || src.includes('color-scheme: light dark')) {
+  throw new Error('plugin must inherit the DSH-selected color scheme instead of reverting to OS preference')
+}
+console.log('✓ current light/dark theme token contract')
 console.log('\nCLIENT BUNDLE OK')

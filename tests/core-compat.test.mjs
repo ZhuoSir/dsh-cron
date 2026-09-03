@@ -17,7 +17,7 @@ const requiredPeers = [
   '@deepseek-ai/dsh-tools',
 ]
 
-assert.equal(manifest.version, '0.3.2')
+assert.equal(manifest.version, '0.3.3')
 for (const name of requiredPeers) {
   assert.equal(
     manifest.peerDependencies[name],
