@@ -19,7 +19,7 @@
 **从 GitHub 安装（推荐使用已验证的不可变 tag）**：
 
 ```sh
-dsh plugin --profile web add github:cloga/dsh-cron#v0.4.0
+dsh plugin --profile web add github:cloga/dsh-cron#v0.4.1
 ```
 
 不带 tag 的 `github:cloga/dsh-cron` 会跟随移动的默认分支，只用于开发，不作为部署验证证据。
@@ -28,7 +28,7 @@ dsh plugin --profile web add github:cloga/dsh-cron#v0.4.0
 
 ```sh
 dsh plugin --profile web add ./dsh-cron            # 本地目录（开发用 link）
-dsh plugin --profile web add ./dsh-cron-0.4.0.tgz  # pnpm pack 产物
+dsh plugin --profile web add ./dsh-cron-0.4.1.tgz  # pnpm pack 产物
 ```
 
 **验证与卸载**：

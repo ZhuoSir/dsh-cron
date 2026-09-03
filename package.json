@@ -1,6 +1,6 @@
 {
   "name": "dsh-cron",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Scheduled tasks for DeepSeek Harness: fire prompts into the owning root Session at a time, interval, or daily clock time, with a Web panel for tasks and run history.",
   "license": "MIT",
   "type": "module",

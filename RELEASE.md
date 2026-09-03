@@ -6,7 +6,7 @@
 4. Run `pnpm install --frozen-lockfile` with pnpm 11.7.0.
 5. Run `pnpm verify` on Node 22.19 and Node 24.
 6. Confirm CI passes on Windows and Linux for both Node versions.
-7. Inspect `dsh-cron-0.4.0.tgz`; require the Host entry, directly wrapped Client entry, patch, README, changelog, license, and package metadata, with no source/build scripts.
+7. Inspect `dsh-cron-0.4.1.tgz`; require the Host entry, directly wrapped Client entry, patch, README, changelog, license, and package metadata, with no source/build scripts.
 8. Install the tarball into a disposable Web Profile and confirm model tools and HTTP requests cannot read or mutate another Session's tasks/history.
 9. Restart the Host and confirm nonterminal history becomes `interrupted` without refiring a consumed task.
 10. After review approval, push an annotated `v<package-version>` tag. `.github/workflows/release.yml` must re-run the exact rc.1 source and package gates, generate `SHA256SUMS`, and create the GitHub Release; never upload a hand-built replacement.

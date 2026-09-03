@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1
+
+- Republish the rc.1 compatibility build after enabling repository-level immutable GitHub Releases.
+- Preserve the reviewed 0.4.0 runtime behavior; only release provenance metadata changes.
+
 ## 0.4.0
 
 - Add bounded compatibility with official DSH `0.1.2-rc.1` while retaining the controlled `0.1.1-rc.2` baseline.

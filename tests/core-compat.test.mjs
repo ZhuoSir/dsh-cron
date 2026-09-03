@@ -19,7 +19,7 @@ const requiredPeers = [
 ]
 const optionalPeers = ['@deepseek-ai/dsh-host-webserver', '@deepseek-ai/dsh-web']
 
-assert.equal(manifest.version, '0.4.0')
+assert.equal(manifest.version, '0.4.1')
 assert.equal(manifest.packageManager, 'pnpm@11.7.0')
 assert.equal(manifest.engines.node, '^22.19.0 || >=24.0.0')
 for (const name of [...requiredPeers, ...optionalPeers]) {

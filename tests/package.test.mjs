@@ -51,8 +51,8 @@ try {
     cwd: root,
     stdio: 'inherit',
   })
-  const tarball = readdirSync(output).find((name) => name === 'dsh-cron-0.4.0.tgz')
-  assert.equal(tarball, 'dsh-cron-0.4.0.tgz')
+  const tarball = readdirSync(output).find((name) => name === 'dsh-cron-0.4.1.tgz')
+  assert.equal(tarball, 'dsh-cron-0.4.1.tgz')
   const tar = process.platform === 'win32' ? join(process.env.SystemRoot, 'System32', 'tar.exe') : 'tar'
   const listing = execFileSync(tar, ['-tf', join(output, tarball)], { encoding: 'utf8' })
   for (const required of [
