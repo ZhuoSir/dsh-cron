@@ -1,8 +1,9 @@
 // Standalone mock-ctx test for dsh-cron (host half). Run: node tests/host.test.mjs
-import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
 
 const plugin = await import('../index.js')
 const { apply, Config } = plugin
@@ -16,6 +17,7 @@ console.log('✓ Config schema defaults')
 function makeCtx(storagePath, historyPath, configTasks, options = {}) {
   const fired = []
   const tools = new Map()
+  const routes = []
   const disposers = []
   const listeners = new Map()
   const mockSession = { id: 'sess-1' }
@@ -52,7 +54,14 @@ function makeCtx(storagePath, historyPath, configTasks, options = {}) {
       },
     },
     sessionPersistence: {
-      list: async () => options.persistenceMissing ? [] : [{ id: inspected.meta.id, cwd: inspected.meta.cwd }],
+      list: async () => options.persistenceMissing
+        ? []
+        : (options.persistenceHeaders ?? [{
+            id: inspected.meta.id,
+            cwd: inspected.meta.cwd,
+            ...(inspected.meta.origin === undefined ? {} : { origin: inspected.meta.origin }),
+            ...(inspected.meta.delegationDepth === undefined ? {} : { delegationDepth: inspected.meta.delegationDepth }),
+          }]),
       inspect: async () => inspected,
     },
     agentPresets: {
@@ -64,6 +73,13 @@ function makeCtx(storagePath, historyPath, configTasks, options = {}) {
     inject: () => {},
     tools: { register: (def) => tools.set(def.name, def) },
   }
+  if (options.http) {
+    ctx.inject = (_services, activate) => activate({
+      ...ctx,
+      webRuntime: { trustedHosts: [] },
+      webServer: { register: (route) => { routes.push(route); return () => {} } },
+    })
+  }
   apply(ctx, Config({
     storagePath,
     historyPath,
@@ -74,12 +90,39 @@ function makeCtx(storagePath, historyPath, configTasks, options = {}) {
     coldWake: options.coldWake ?? true,
   }))
   const emit = (event, ...args) => listeners.get(event)?.(...args)
-  return { ctx, fired, tools, disposers, mockAgent, mockSession, emit, roots, resumes, mounts, selections }
+  return { ctx, fired, tools, routes, disposers, mockAgent, mockSession, emit, roots, resumes, mounts, selections }
+}
+
+async function callHttp(route, method, payload) {
+  const req = new EventEmitter()
+  req.method = 'POST'
+  req.url = `/cron/api/${method}`
+  req.headers = { host: '127.0.0.1:3080', 'sec-fetch-site': 'same-origin' }
+  req.destroy = () => {}
+  let status
+  let body = ''
+  const res = {
+    headersSent: false,
+    writeHead(value) { status = value; this.headersSent = true },
+    end(value = '') { body += value },
+  }
+  const pending = route.handler(req, res)
+  req.emit('data', Buffer.from(JSON.stringify(payload)))
+  req.emit('end')
+  await pending
+  return { status, body: JSON.parse(body) }
 }
 
 const dir = mkdtempSync(join(tmpdir(), 'dsh-cron-test-'))
 const storagePath = join(dir, 'cron-tasks.json')
 const historyPath = join(dir, 'cron-history.jsonl')
+assert.throws(
+  () => makeCtx(join(dir, 'invalid-static.json'), join(dir, 'invalid-history.jsonl'), [
+    { id: 'unowned-static', prompt: 'unsafe', every: 60 },
+  ]),
+  /requires an explicit sessionId owner/,
+)
+console.log('✓ unbound static config task rejected at startup')
 
 const past = new Date(Date.now() - 60_000).toISOString()
 const pastHM = new Date(Date.now() - 60_000)
@@ -106,7 +149,7 @@ console.log('✓ due tasks fired')
 
 // --- history: delivered records written
 assert.ok(existsSync(historyPath), 'history file written')
-let records = JSON.parse(await run1.tools.get('cron_history').execute({ limit: 10 }, {}))
+let records = JSON.parse(await run1.tools.get('cron_history').execute({ limit: 10 }, { agent: run1.mockAgent }))
 assert.equal(records.length, 2)
 assert.ok(records.every((r) => r.status === 'delivered'), 'records start as delivered')
 console.log('✓ history records delivered')
@@ -119,7 +162,7 @@ run1.emit('session/event', run1.mockSession, {
   data: { turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: '晨报已生成：今日待办 5 项。' }] } },
 })
 run1.emit('session/event', run1.mockSession, { type: 'turn/end', seq: 3, time: Date.now(), data: { turn: 1, reason: { kind: 'completed' } } })
-records = JSON.parse(await run1.tools.get('cron_history').execute({ limit: 10 }, {}))
+records = JSON.parse(await run1.tools.get('cron_history').execute({ limit: 10 }, { agent: run1.mockAgent }))
 const onceRecord = records.find((r) => r.taskId === 'once')
 assert.equal(onceRecord.status, 'completed', 'turn end completes record')
 assert.equal(onceRecord.excerpt, '晨报已生成：今日待办 5 项。', 'excerpt captured')
@@ -132,7 +175,7 @@ console.log('✓ history correlation (running -> excerpt -> completed)')
 const morningMsg = run1.fired.find((m) => m.content[0].text.includes('"morning"'))
 run1.emit('session/event', run1.mockSession, { type: 'user/message', seq: 4, time: Date.now(), data: { ...morningMsg } })
 run1.emit('session/event', run1.mockSession, { type: 'turn/end', seq: 5, time: Date.now(), data: { turn: 2, reason: { kind: 'error', error: { message: 'boom' } } } })
-records = JSON.parse(await run1.tools.get('cron_history').execute({ limit: 10 }, {}))
+records = JSON.parse(await run1.tools.get('cron_history').execute({ limit: 10 }, { agent: run1.mockAgent }))
 const morningRecord = records.find((r) => r.taskId === 'morning')
 assert.equal(morningRecord.status, 'failed')
 assert.equal(morningRecord.endReason, 'error')
@@ -151,34 +194,103 @@ const strictArgs = {
   daily: '08:00', cron: '', timeZone: 'UTC',
 }
 await run1.tools.get('cron_add').execute(strictArgs, { agent: run1.mockAgent })
-let strictTask = JSON.parse(await run1.tools.get('cron_list').execute({}, {})).find((task) => task.id === 'strict-args')
+let strictTask = JSON.parse(await run1.tools.get('cron_list').execute({}, { agent: run1.mockAgent })).find((task) => task.id === 'strict-args')
 assert.equal(strictTask.schedule.daily, '08:00')
 assert.equal(strictTask.schedule.everySeconds, undefined)
 await run1.tools.get('cron_update').execute({
   id: 'strict-args', prompt: '', at: '', every: 0,
   daily: '', cron: '0 9 * * *', timeZone: 'UTC',
-})
-strictTask = JSON.parse(await run1.tools.get('cron_list').execute({}, {})).find((task) => task.id === 'strict-args')
+}, { agent: run1.mockAgent })
+strictTask = JSON.parse(await run1.tools.get('cron_list').execute({}, { agent: run1.mockAgent })).find((task) => task.id === 'strict-args')
 assert.equal(strictTask.schedule.cron, '0 9 * * *')
 assert.equal(strictTask.schedule.daily, undefined)
 console.log('✓ strict tool-call placeholders are ignored')
 
+
 // --- validation
 await assert.rejects(run1.tools.get('cron_add').execute({ id: 'bad', prompt: 'x', every: 30, daily: '10:00' }, { agent: run1.mockAgent }), /exactly one/)
 await assert.rejects(run1.tools.get('cron_add').execute({ id: 'dyn', prompt: 'x', every: 60 }, { agent: run1.mockAgent }), /already exists/)
-await assert.rejects(run1.tools.get('cron_add').execute({ id: 'unbound', prompt: 'x', every: 60 }, {}), /bound sessionId/)
+await assert.rejects(run1.tools.get('cron_add').execute({ id: 'unbound', prompt: 'x', every: 60 }, {}), /root Session owner/)
 console.log('✓ cron_add validation')
+
+// --- model tools are root-Session scoped and cannot cross owners
+const ownerTwo = { id: 'root-2', session: { id: 'sess-2' }, followup: () => {} }
+run1.roots.push(ownerTwo)
+await run1.tools.get('cron_add').execute({ id: 'other-owned', prompt: 'other', every: 180 }, { agent: ownerTwo })
+const ownerOneTasks = JSON.parse(await run1.tools.get('cron_list').execute({}, { agent: run1.mockAgent }))
+const ownerTwoTasks = JSON.parse(await run1.tools.get('cron_list').execute({}, { agent: ownerTwo }))
+assert.ok(ownerOneTasks.every((task) => task.sessionId === 'sess-1'))
+assert.deepEqual(ownerTwoTasks.map((task) => task.id), ['other-owned'])
+await assert.rejects(
+  run1.tools.get('cron_update').execute({ id: 'other-owned', prompt: 'stolen' }, { agent: run1.mockAgent }),
+  /not owned by Session/,
+)
+await assert.rejects(
+  run1.tools.get('cron_remove').execute({ id: 'other-owned' }, { agent: run1.mockAgent }),
+  /not owned by Session/,
+)
+await assert.rejects(
+  run1.tools.get('cron_add').execute({ id: 'rebind', prompt: 'x', every: 180, sessionId: 'sess-2' }, { agent: run1.mockAgent }),
+  /cannot assign another Session owner/,
+)
+const subagent = { id: 'child', session: { id: 'sess-child' } }
+await assert.rejects(run1.tools.get('cron_list').execute({}, { agent: subagent }), /root Session owner/)
+await run1.tools.get('cron_update').execute({ id: 'other-owned', prompt: 'updated' }, { agent: ownerTwo })
+await run1.tools.get('cron_remove').execute({ id: 'other-owned' }, { agent: ownerTwo })
+assert.deepEqual(JSON.parse(await run1.tools.get('cron_history').execute({ limit: 10 }, { agent: ownerTwo })), [])
+console.log('✓ model-tool root Session ownership and per-session authorization')
+
+// --- HTTP operations require and preserve the same Session owner
+const httpDir = mkdtempSync(join(tmpdir(), 'dsh-cron-http-'))
+const httpRootOne = { id: 'http-root-1', session: { id: 'sess-1' }, followup: () => {} }
+const httpRootTwo = { id: 'http-root-2', session: { id: 'sess-2' }, followup: () => {} }
+const httpRun = makeCtx(join(httpDir, 'tasks.json'), join(httpDir, 'history.jsonl'), [], {
+  http: true,
+  roots: [httpRootOne, httpRootTwo],
+})
+const route = httpRun.routes[0]
+assert.ok(route, 'HTTP route registered')
+assert.equal((await callHttp(route, 'add', { id: 'unknown', prompt: 'no', every: 120, sessionId: 'sess-unknown' })).status, 400)
+assert.equal((await callHttp(route, 'add', { id: 'subagent', prompt: 'no', every: 120, sessionId: 'sess-child' })).status, 400)
+assert.equal((await callHttp(route, 'add', { id: 'http-one', prompt: 'one', every: 120, sessionId: 'sess-1' })).status, 200)
+assert.equal((await callHttp(route, 'add', { id: 'http-two', prompt: 'two', every: 120, sessionId: 'sess-2' })).status, 200)
+assert.deepEqual((await callHttp(route, 'list', { sessionId: 'sess-1' })).body.result.tasks.map((task) => task.id), ['http-one'])
+assert.equal((await callHttp(route, 'update', { id: 'http-two', prompt: 'stolen', sessionId: 'sess-1' })).status, 400)
+assert.equal((await callHttp(route, 'remove', { id: 'http-two', sessionId: 'sess-1' })).status, 400)
+assert.equal((await callHttp(route, 'history', {})).status, 400)
+assert.equal((await callHttp(route, 'update', { id: 'http-two', prompt: 'owned', sessionId: 'sess-2' })).status, 200)
+assert.equal((await callHttp(route, 'remove', { id: 'http-two', sessionId: 'sess-2' })).status, 200)
+httpRun.disposers.forEach((dispose) => dispose?.())
+rmSync(httpDir, { recursive: true, force: true })
+console.log('✓ HTTP per-session ownership authorization')
 
 // --- reload: run stamps survive, one-shot does not refire, history reloads
 run1.disposers.forEach((d) => d?.())
 const run2 = makeCtx(storagePath, historyPath, configTasks)
 await new Promise((r) => setTimeout(r, 4200))
 assert.equal(run2.fired.length, 0, `nothing refires after reload (got ${run2.fired.length})`)
-const reloaded = JSON.parse(await run2.tools.get('cron_history').execute({ limit: 10 }, {}))
+const reloaded = JSON.parse(await run2.tools.get('cron_history').execute({ limit: 10 }, { agent: run2.mockAgent }))
 assert.equal(reloaded.length, 2, 'history survives reload')
 assert.equal(reloaded.find((r) => r.taskId === 'once').status, 'completed', 'completed status survives')
 console.log('✓ restart: no refire, history survives')
 run2.disposers.forEach((d) => d?.())
+
+// --- restart reconciles nonterminal history instead of leaving phantom runs
+const interruptedDir = mkdtempSync(join(tmpdir(), 'dsh-cron-interrupted-'))
+const interruptedHistory = join(interruptedDir, 'history.jsonl')
+writeFileSync(interruptedHistory, [
+  { id: 'delivered-run', seq: 0, taskId: 'a', sessionId: 'sess-1', status: 'delivered' },
+  { id: 'running-run', seq: 1, taskId: 'b', sessionId: 'sess-1', status: 'running' },
+  { id: 'done-run', seq: 2, taskId: 'c', sessionId: 'sess-1', status: 'completed' },
+].map((record) => JSON.stringify(record)).join('\n') + '\n')
+const interrupted = makeCtx(join(interruptedDir, 'tasks.json'), interruptedHistory, [])
+const interruptedRecords = JSON.parse(await interrupted.tools.get('cron_history').execute({ limit: 10 }, { agent: interrupted.mockAgent }))
+assert.equal(interruptedRecords.find((record) => record.id === 'delivered-run').status, 'interrupted')
+assert.equal(interruptedRecords.find((record) => record.id === 'running-run').endReason, 'host-restart')
+assert.equal(interruptedRecords.find((record) => record.id === 'done-run').status, 'completed')
+interrupted.disposers.forEach((dispose) => dispose?.())
+rmSync(interruptedDir, { recursive: true, force: true })
+console.log('✓ restart reconciles delivered/running history as interrupted')
 
 // --- strict fixed-session delivery: never fall back to another live root
 const strictDir = mkdtempSync(join(tmpdir(), 'dsh-cron-strict-'))
@@ -208,6 +320,27 @@ console.log('✓ strict cold owner delivery with saved model')
 strict.disposers.forEach((d) => d?.())
 rmSync(strictDir, { recursive: true, force: true })
 
+// --- durable subagent ownership is never promoted through cold resume
+for (const lineage of [
+  { origin: 'subagent' },
+  { delegationDepth: 1 },
+]) {
+  const lineageDir = mkdtempSync(join(tmpdir(), 'dsh-cron-lineage-'))
+  const rejected = makeCtx(join(lineageDir, 'tasks.json'), join(lineageDir, 'history.jsonl'), [
+    { id: 'child-owned', prompt: 'must not resume', at: past, sessionId: 'sess-child-cold' },
+  ], {
+    roots: [otherAgent],
+    persistenceHeaders: [{ id: 'sess-child-cold', cwd: 'C:\\workspace', ...lineage }],
+    inspected: { meta: { id: 'sess-child-cold', cwd: 'C:\\workspace', ...lineage }, events: [] },
+  })
+  await new Promise((r) => setTimeout(r, 2200))
+  assert.equal(rejected.resumes.length, 0, `subagent lineage ${JSON.stringify(lineage)} must not resume`)
+  assert.equal(rejected.fired.length, 0, 'subagent-owned task must remain undelivered')
+  rejected.disposers.forEach((d) => d?.())
+  rmSync(lineageDir, { recursive: true, force: true })
+}
+console.log('✓ durable subagent sessions are rejected before cold resume')
+
 // --- failed cold resume remains overdue and never consumes the slot
 const failedDir = mkdtempSync(join(tmpdir(), 'dsh-cron-resume-fail-'))
 const failed = makeCtx(join(failedDir, 'tasks.json'), join(failedDir, 'history.jsonl'), [
@@ -230,7 +363,9 @@ serial.ctx.agents.resume = async (request) => {
   await new Promise((resolve) => { releaseResume = resolve })
   return { agent: { id: 'sess-1', session: { id: 'sess-1' }, followup: (msg) => serial.fired.push(msg) } }
 }
+serial.roots.push(serial.mockAgent)
 await serial.tools.get('cron_add').execute({ id: 'serial', prompt: 'serial', every: 60 }, { agent: serial.mockAgent })
+serial.roots.splice(0)
 const runTool = serial.tools.get('cron_list')
 assert.ok(runTool, 'serial harness remains usable')
 // Scheduler tick ownership is covered by two ticks while resume is pending.

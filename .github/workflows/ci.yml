@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ['22.19.0', '24']
+    runs-on: ${{ matrix.os }}
+    env:
+      DSH_CORE_PATH: ${{ github.workspace }}/dsh-rc1
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: a66e4702047846cdaa10c66c9d3df3951f5ea70d
+          path: dsh-rc1
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify

@@ -536,8 +536,11 @@ export function apply(ctx, config) {
     if (invalid) logger.warn(`cron: skipping stored task: ${invalid}`)
   }
   for (const raw of config.tasks ?? []) {
-    const invalid = addTask(raw, 'config')
-    if (invalid) logger.warn(`cron: skipping config task: ${invalid}`)
+    if (typeof raw?.sessionId !== 'string' || raw.sessionId.trim() === '') {
+      throw new Error(`cron: static task ${JSON.stringify(raw?.id ?? '<unknown>')} requires an explicit sessionId owner`)
+    }
+    const invalid = addTask({ ...raw, sessionId: raw.sessionId.trim() }, 'config')
+    if (invalid) throw new Error(`cron: invalid static task: ${invalid}`)
   }
   for (const [id, run] of Object.entries(stored.runs)) {
     const task = tasks.get(id)
@@ -575,6 +578,16 @@ export function apply(ctx, config) {
         } catch { /* skip a torn line */ }
       }
       if (history.length > MAX_HISTORY) history = history.slice(-MAX_HISTORY)
+      let reconciled = false
+      const interruptedAt = Date.now()
+      for (const record of history) {
+        if (record.status !== 'delivered' && record.status !== 'running') continue
+        record.status = 'interrupted'
+        record.endReason = 'host-restart'
+        record.completedAt = interruptedAt
+        reconciled = true
+      }
+      if (reconciled) persistHistory()
     } catch (error) {
       logger.warn(`cron: ignoring unreadable history ${historyPath}: ${error?.message ?? error}`)
       history = []
@@ -606,6 +619,10 @@ export function apply(ctx, config) {
     Object.assign(record, patch)
     persistHistory()
   }
+
+  // A prior process cannot finish a nonterminal run. Reconcile before timers,
+  // tools, or HTTP queries expose history from this process.
+  loadHistory()
 
   /**
    * Runs awaiting their execution outcome, keyed by injected message id.
@@ -717,6 +734,10 @@ export function apply(ctx, config) {
       try {
         const header = (await ctx.sessionPersistence.list()).find((candidate) => String(candidate.id) === sessionId)
         if (!header?.cwd) return null
+        if (header.origin === 'subagent' || Number(header.delegationDepth ?? 0) > 0) {
+          logger.warn(`cron: bound session "${sessionId}" is subagent-owned; refusing cold resume`)
+          return null
+        }
         inspected = await ctx.sessionPersistence.inspect(header.id)
       } catch (error) {
         logger.warn(`cron: cannot inspect bound session "${sessionId}": ${error?.message ?? error}`)
@@ -845,25 +866,41 @@ export function apply(ctx, config) {
 
   // --- shared operations (tools + HTTP API) -----------------------------------
 
+  function requireSessionId(value, source) {
+    if (typeof value !== 'string' || value.trim() === '') throw new Error(`${source} requires a session owner`)
+    return value.trim()
+  }
+
+  function toolRootSessionId(exec) {
+    const agent = exec?.agent
+    if (!agent || !ctx.agents.roots().includes(agent)) throw new Error('cron tools require a live root Session owner')
+    return requireSessionId(agent.session?.id, 'cron tool call')
+  }
+
+  function assertTaskOwner(task, sessionId) {
+    const owner = requireSessionId(sessionId, 'cron operation')
+    if (task.sessionId !== owner) throw new Error(`task "${task.id}" is not owned by Session "${owner}"`)
+    return owner
+  }
+
   function listTasks(sessionId) {
+    const owner = requireSessionId(sessionId, 'cron list')
     const now = Date.now()
     return [...tasks.values()]
-      .filter((task) => !sessionId || task.sessionId === sessionId)
+      .filter((task) => task.sessionId === owner)
       .map((task) => taskView(task, now, startedAt))
   }
 
   function addDynamicTask(raw, sessionId) {
+    const owner = requireSessionId(sessionId, 'cron add')
     const input = { ...raw }
     // The id is optional for callers: the web form never asks for one and
     // the model may omit it — allocate a unique id instead.
     if (input.id == null || input.id === '') input.id = generateTaskId(tasks)
-    // Bind to the caller's session so the task fires back into the window
-    // it was created from. An explicit payload sessionId wins (panel add).
-    if (sessionId && (input.sessionId == null || input.sessionId === '')) input.sessionId = sessionId
-    if (typeof input.sessionId !== 'string' || input.sessionId.trim() === '') {
-      throw new Error('dynamic tasks require a bound sessionId')
+    if (input.sessionId != null && String(input.sessionId).trim() !== owner) {
+      throw new Error(`cron add cannot assign another Session owner`)
     }
-    input.sessionId = input.sessionId.trim()
+    input.sessionId = owner
     const invalid = validateTask(input)
     if (invalid) throw new Error(invalid)
     const added = addTask(input, 'dynamic')
@@ -873,9 +910,10 @@ export function apply(ctx, config) {
     return taskView(task, Date.now(), startedAt)
   }
 
-  function removeDynamicTask(id) {
+  function removeDynamicTask(id, sessionId) {
     const task = tasks.get(id)
     if (!task) throw new Error(`no task with id "${id}"`)
+    assertTaskOwner(task, sessionId)
     if (task.origin !== 'dynamic') throw new Error(`task "${id}" comes from cordis.yml config; remove it there`)
     tasks.delete(id)
     save()
@@ -904,9 +942,10 @@ export function apply(ctx, config) {
    * is present in the patch the whole schedule is replaced (the other rules
    * are cleared) and the run stamps reset so the new rule takes effect now.
    */
-  function updateDynamicTask(id, patch) {
+  function updateDynamicTask(id, patch, sessionId) {
     const task = tasks.get(id)
     if (!task) throw new Error(`no task with id "${id}"`)
+    assertTaskOwner(task, sessionId)
     if (task.origin !== 'dynamic') throw new Error(`task "${id}" comes from cordis.yml config; edit it there`)
     const merged = { id, prompt: task.prompt, sessionId: task.sessionId, timeZone: task.timeZone }
     for (const k of RULE_KEYS) if (task[k] != null) merged[k] = task[k]
@@ -935,9 +974,10 @@ export function apply(ctx, config) {
     return taskView(task, Date.now(), startedAt)
   }
 
-  function setTaskEnabled(id, enabled) {
+  function setTaskEnabled(id, enabled, sessionId) {
     const task = tasks.get(id)
     if (!task) throw new Error(`no task with id "${id}"`)
+    assertTaskOwner(task, sessionId)
     if (typeof enabled !== 'boolean') throw new Error('enabled must be a boolean')
     // null clears the override when it matches the declared flag again.
     task.enabledOverride = enabled === (task.enabled !== false) ? null : enabled
@@ -945,18 +985,20 @@ export function apply(ctx, config) {
     return taskView(task, Date.now(), startedAt)
   }
 
-  async function runTaskNow(id) {
+  async function runTaskNow(id, sessionId) {
     const task = tasks.get(id)
     if (!task) throw new Error(`no task with id "${id}"`)
+    assertTaskOwner(task, sessionId)
     const record = await fire(task, Date.now())
     if (!record) throw new Error(`bound session "${task.sessionId ?? ''}" is unavailable`)
     return { fired: id, run: record }
   }
 
   function listHistory(limit, sessionId) {
+    const owner = requireSessionId(sessionId, 'cron history')
     loadHistory()
     const cap = Number.isFinite(limit) && limit > 0 ? Math.min(limit, MAX_HISTORY) : 100
-    const matching = sessionId ? history.filter((record) => record.sessionId === sessionId) : history
+    const matching = history.filter((record) => record.sessionId === owner)
     return matching.slice(-cap).reverse()
   }
 
@@ -970,8 +1012,8 @@ export function apply(ctx, config) {
       schema: { type: 'string' },
       render: (_args, value) => [{ type: 'text', text: value }],
     },
-    async execute() {
-      return JSON.stringify(listTasks(), null, 2)
+    async execute(_args, exec) {
+      return JSON.stringify(listTasks(toolRootSessionId(exec)), null, 2)
     },
   }))
 
@@ -993,7 +1035,7 @@ export function apply(ctx, config) {
     },
     async execute(args, exec) {
       // Bind to the calling session: the task's runs reply in this window.
-      const view = addDynamicTask(normalizeToolScheduleArgs(args), exec?.agent?.session?.id)
+      const view = addDynamicTask(normalizeToolScheduleArgs(args), toolRootSessionId(exec))
       return `Task "${view.id}" added. Next run: ${view.nextRunAt}`
     },
   }))
@@ -1014,9 +1056,9 @@ export function apply(ctx, config) {
       schema: { type: 'string' },
       render: (_args, value) => [{ type: 'text', text: value }],
     },
-    async execute(args) {
+    async execute(args, exec) {
       const patch = normalizeToolScheduleArgs(args)
-      const view = updateDynamicTask(patch.id, patch)
+      const view = updateDynamicTask(patch.id, patch, toolRootSessionId(exec))
       return `Task "${view.id}" updated. Next run: ${view.nextRunAt}`
     },
   }))
@@ -1031,8 +1073,8 @@ export function apply(ctx, config) {
       schema: { type: 'string' },
       render: (_args, value) => [{ type: 'text', text: value }],
     },
-    async execute(args) {
-      removeDynamicTask(args.id)
+    async execute(args, exec) {
+      removeDynamicTask(args.id, toolRootSessionId(exec))
       return `Task "${args.id}" removed.`
     },
   }))
@@ -1047,8 +1089,8 @@ export function apply(ctx, config) {
       schema: { type: 'string' },
       render: (_args, value) => [{ type: 'text', text: value }],
     },
-    async execute(args) {
-      return JSON.stringify(listHistory(args.limit ?? 20), null, 2)
+    async execute(args, exec) {
+      return JSON.stringify(listHistory(args.limit ?? 20, toolRootSessionId(exec)), null, 2)
     },
   }))
 
@@ -1060,14 +1102,20 @@ export function apply(ctx, config) {
   ctx.inject(['webServer', 'webRuntime'], (webCtx) => {
     const fence = (req) => isTrustedApiRequest(req, webCtx.webRuntime.trustedHosts)
 
+    const httpOwner = (payload) => {
+      const sessionId = requireSessionId(payload?.sessionId, 'cron HTTP request')
+      const owner = ctx.agents.roots().find((agent) => String(agent.session?.id) === sessionId)
+      if (!owner) throw new Error('cron HTTP request requires a live root Session owner')
+      return sessionId
+    }
     const api = {
-      list: (payload) => ({ tasks: listTasks(payload?.sessionId) }),
-      add: (payload) => ({ task: addDynamicTask(payload, payload?.sessionId) }),
-      update: (payload) => ({ task: updateDynamicTask(payload?.id, payload ?? {}) }),
-      remove: (payload) => removeDynamicTask(payload?.id),
-      toggle: (payload) => ({ task: setTaskEnabled(payload?.id, payload?.enabled) }),
-      run: (payload) => runTaskNow(payload?.id),
-      history: (payload) => ({ records: listHistory(payload?.limit, payload?.sessionId) }),
+      list: (payload) => ({ tasks: listTasks(httpOwner(payload)) }),
+      add: (payload) => ({ task: addDynamicTask(payload, httpOwner(payload)) }),
+      update: (payload) => ({ task: updateDynamicTask(payload?.id, payload ?? {}, httpOwner(payload)) }),
+      remove: (payload) => removeDynamicTask(payload?.id, httpOwner(payload)),
+      toggle: (payload) => ({ task: setTaskEnabled(payload?.id, payload?.enabled, httpOwner(payload)) }),
+      run: (payload) => runTaskNow(payload?.id, httpOwner(payload)),
+      history: (payload) => ({ records: listHistory(payload?.limit, httpOwner(payload)) }),
     }
 
     webCtx.effect(() => webCtx.webServer.register({

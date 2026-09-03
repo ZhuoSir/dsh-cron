@@ -161,7 +161,7 @@ interface RunRecord {
   prompt: string
   scheduledFor: string
   firedAt: string
-  status: 'delivered' | 'running' | 'completed' | 'failed'
+  status: 'delivered' | 'running' | 'completed' | 'failed' | 'interrupted'
   startedAt?: number
   completedAt?: number
   endReason?: string
@@ -287,16 +287,16 @@ function ToastCard({ t, item }: { t: T; item: ToastItem }) {
  * matter how many sessions are open. The first poll only primes the snapshot
  * (old records never toast).
  */
-function useCronWatcher(): void {
+function useCronWatcher(sessionId: string | null): void {
   const snapshotRef = useRef<Map<string, string> | null>(null)
 
   useEffect(() => {
     let stopped = false
     console.info('[dsh-cron] watcher started (poll every %ds)', POLL_MS / 1000)
     const poll = async () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      if (!sessionId || typeof document !== 'undefined' && document.visibilityState === 'hidden') return
       try {
-        const { records } = await api<{ records: RunRecord[] }>('history', { limit: 20 })
+        const { records } = await api<{ records: RunRecord[] }>('history', { limit: 20, sessionId })
         if (stopped) return
         const prev = snapshotRef.current
         snapshotRef.current = new Map(records.map((r) => [r.id, r.status]))
@@ -319,7 +319,7 @@ function useCronWatcher(): void {
       stopped = true
       clearInterval(timer)
     }
-  }, [])
+  }, [sessionId])
 }
 
 function formatTime(iso: string | null | undefined): string {
@@ -372,7 +372,7 @@ function ruleValueOf(task: TaskView): string {
 }
 
 /** Inline editor for one dynamic task (prompt + schedule rule). */
-function EditTaskForm({ t, task, onDone }: { t: T; task: TaskView; onDone: () => void }) {
+function EditTaskForm({ t, task, sessionId, onDone }: { t: T; task: TaskView; sessionId: string; onDone: () => void }) {
   const [form, setForm] = useState<EditFormState>({ prompt: task.prompt, rule: ruleOf(task), value: ruleValueOf(task) })
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -381,7 +381,7 @@ function EditTaskForm({ t, task, onDone }: { t: T; task: TaskView; onDone: () =>
     setBusy(true)
     setError('')
     try {
-      const payload: Record<string, unknown> = { id: task.id, prompt: form.prompt.trim() }
+      const payload: Record<string, unknown> = { id: task.id, prompt: form.prompt.trim(), sessionId }
       if (form.rule === 'daily') payload.daily = form.value.trim()
       else if (form.rule === 'every') payload.every = Number(form.value.trim())
       else if (form.rule === 'cron') payload.cron = form.value.trim()
@@ -469,9 +469,9 @@ function CronPanel({ t, tab, setTab, sessionId }: { t: T; tab: DrawerTab; setTab
     return () => clearInterval(timer)
   }, [refresh])
 
-  const act = async (method: string, payload: unknown) => {
+  const act = async (method: string, payload: Record<string, unknown>) => {
     try {
-      await api(method, payload)
+      await api(method, { ...payload, sessionId })
       await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -504,7 +504,7 @@ function CronPanel({ t, tab, setTab, sessionId }: { t: T; tab: DrawerTab; setTab
             {tasks.map((task) => (
               <div key={task.id} className={task.enabled ? styles.row : styles.rowDisabled}>
                 {editingId === task.id ? (
-                  <EditTaskForm t={t} task={task} onDone={() => { setEditingId(null); void refresh() }} />
+                  <EditTaskForm t={t} task={task} sessionId={sessionId} onDone={() => { setEditingId(null); void refresh() }} />
                 ) : (
                   <>
                     <div className={styles.rowHead}>
@@ -580,7 +580,7 @@ interface SlotProps {
 function CronDrawer({ t }: SlotProps) {
   const tr = t ?? fallbackT
   const { open, sessionId, tab, toasts, prefs: currentPrefs } = useDrawerState()
-  useCronWatcher()
+  useCronWatcher(sessionId)
 
   // Escape closes the drawer while it is open.
   useEffect(() => {

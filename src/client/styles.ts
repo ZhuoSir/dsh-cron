@@ -48,6 +48,7 @@ export const styles = {
   dot_running: 'dsh-cron-dot dsh-cron-dotRunning',
   dot_completed: 'dsh-cron-dot dsh-cron-dotCompleted',
   dot_failed: 'dsh-cron-dot dsh-cron-dotFailed',
+  dot_interrupted: 'dsh-cron-dot dsh-cron-dotInterrupted',
   unreadBadge: 'dsh-cron-unreadBadge',
   toastStack: 'dsh-cron-toastStack',
   toast: 'dsh-cron-toast',
@@ -149,6 +150,7 @@ export const css = `
 .dsh-cron-dotRunning { background: var(--dsw-alias-brand-primary, #3b82f6); }
 .dsh-cron-dotCompleted { background: var(--dsw-alias-state-success-primary, #22c55e); }
 .dsh-cron-dotFailed { background: var(--dsw-alias-state-error-primary, #ef4444); }
+.dsh-cron-dotInterrupted { background: var(--dsw-alias-state-warning-primary, #f59e0b); }
 .dsh-cron-taskId { font-family: var(--dsw-font-mono, monospace); font-size: 12px; color: var(--dsh-cron-label-primary); flex: 1; min-width: 0; word-break: break-all; }
 .dsh-cron-badge {
   flex: none; font-size: 10px; line-height: 16px; padding: 0 6px; border-radius: 5px;

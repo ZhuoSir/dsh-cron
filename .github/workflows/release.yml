@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      DSH_CORE_PATH: ${{ github.workspace }}/dsh-rc1
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@v6
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: a66e4702047846cdaa10c66c9d3df3951f5ea70d
+          path: dsh-rc1
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Verify annotated version tag
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          test "$GITHUB_REF_NAME" = "v$version"
+          test "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" = tag
+      - run: pnpm install --frozen-lockfile
+      - name: Verify exact rc.1 source and package
+        run: pnpm verify
+      - run: mkdir artifacts
+      - run: pnpm pack --pack-destination artifacts
+      - name: Write and verify SHA-256 manifest
+        shell: bash
+        run: |
+          cd artifacts
+          sha256sum -- *.tgz > SHA256SUMS
+          sha256sum --check SHA256SUMS
+      - name: Create immutable GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          gh release create "$GITHUB_REF_NAME" artifacts/*.tgz artifacts/SHA256SUMS \
+            --verify-tag \
+            --title "dsh-cron $version" \
+            --generate-notes

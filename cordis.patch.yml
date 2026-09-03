@@ -19,13 +19,13 @@
         # Resume the exact bound Session when it is cold; never fall back.
         coldWake: true
         # Native OS notification when a run finishes (macOS osascript / Linux
-        # notify-send). Fires from the host process — works with no browser
-        # open at all.
+        # notify-send). Windows is a quiet no-op. Fires from the host process.
         systemNotify: true
         # Play the OS alert sound with the native notification.
         systemNotifySound: true
-        # Static tasks declared in config. Dynamic tasks created through the
-        # cron_add tool live in the storage file instead.
+        # Static tasks declared in config. Every entry requires an explicit
+        # sessionId owner or plugin startup fails. Dynamic tasks created through
+        # cron_add bind to ToolRunContext.exec.agent's live root Session.
         # Each task: { id?, prompt, at? | every? | daily? | cron?, sessionId?, enabled? }
         #   at:    ISO 8601 instant, fires once        ("2026-08-23T09:00:00+08:00")
         #   every: fixed interval in seconds, min 10   (3600)
