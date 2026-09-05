@@ -15,16 +15,21 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         node: ['22.19.0', '24']
+        core:
+          - name: rc1
+            ref: a66e4702047846cdaa10c66c9d3df3951f5ea70d
+          - name: alpha013
+            ref: d347e703908d0406b7a7ef80e3a0e594d86b2215
     runs-on: ${{ matrix.os }}
     env:
-      DSH_CORE_PATH: ${{ github.workspace }}/dsh-rc1
+      DSH_CORE_PATH: ${{ github.workspace }}/dsh-core
     steps:
       - uses: actions/checkout@v6
       - uses: actions/checkout@v6
         with:
           repository: deepseek-ai/deepseek-harness
-          ref: a66e4702047846cdaa10c66c9d3df3951f5ea70d
-          path: dsh-rc1
+          ref: ${{ matrix.core.ref }}
+          path: dsh-core
           persist-credentials: false
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2
+
+- Add bounded compatibility with DSH Core `0.1.3-alpha.1` while retaining the `0.1.1-rc.2` and `0.1.2` compatibility lines.
+- Migrate cold Session reads to snapshot headers and lifecycle-owned read handles (`open(id, 'read')`, `read()`, `close()`), with an API-shape-only legacy `inspect()` fallback; read or close failures abort that resume attempt.
+- Cover `snapshot.header`, handle cleanup on success/failure, and the legacy persistence seam in focused tests.
+
 ## 0.4.1
 
 - Republish the rc.1 compatibility build after enabling repository-level immutable GitHub Releases.

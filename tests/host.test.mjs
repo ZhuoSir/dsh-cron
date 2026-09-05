@@ -26,6 +26,11 @@ function makeCtx(storagePath, historyPath, configTasks, options = {}) {
   const resumes = []
   const mounts = []
   const selections = []
+  const persistenceOpens = []
+  const persistenceReads = []
+  const persistenceCloses = []
+  const persistenceInspects = []
+  const warnings = []
   const inspected = options.inspected ?? {
     meta: { id: 'sess-1', cwd: 'C:\\workspace', agentPreset: 'standard' },
     events: [
@@ -33,8 +38,44 @@ function makeCtx(storagePath, historyPath, configTasks, options = {}) {
       { type: 'agent-preset/selected', data: { agentPreset: 'coding' } },
     ],
   }
+  const persistenceHeaders = options.persistenceHeaders ?? [{
+    id: inspected.meta.id,
+    cwd: inspected.meta.cwd,
+    ...(inspected.meta.origin === undefined ? {} : { origin: inspected.meta.origin }),
+    ...(inspected.meta.delegationDepth === undefined ? {} : { delegationDepth: inspected.meta.delegationDepth }),
+  }]
+  const sessionPersistence = {
+    list: async () => {
+      if (options.persistenceMissing) return []
+      return options.persistenceApi === 'handle'
+        ? persistenceHeaders.map((header, index) => ({ header, revision: `revision-${index}` }))
+        : persistenceHeaders
+    },
+  }
+  if (options.persistenceApi === 'handle') {
+    sessionPersistence.open = async (id, access) => {
+      persistenceOpens.push({ id, access })
+      return {
+        header: inspected.meta,
+        read: async () => {
+          persistenceReads.push(id)
+          if (options.persistenceReadError) throw options.persistenceReadError
+          return inspected.events
+        },
+        close: async () => {
+          persistenceCloses.push(id)
+          if (options.persistenceCloseError) throw options.persistenceCloseError
+        },
+      }
+    }
+  } else {
+    sessionPersistence.inspect = async (id) => {
+      persistenceInspects.push(id)
+      return inspected
+    }
+  }
   const ctx = {
-    logger: { info: () => {}, warn: (m) => console.warn('  [warn]', m) },
+    logger: { info: () => {}, warn: (m) => { warnings.push(m); console.warn('  [warn]', m) } },
     agents: {
       roots: () => roots,
       resume: async (request) => {
@@ -53,17 +94,7 @@ function makeCtx(storagePath, historyPath, configTasks, options = {}) {
         return { agent, dispose: async () => {} }
       },
     },
-    sessionPersistence: {
-      list: async () => options.persistenceMissing
-        ? []
-        : (options.persistenceHeaders ?? [{
-            id: inspected.meta.id,
-            cwd: inspected.meta.cwd,
-            ...(inspected.meta.origin === undefined ? {} : { origin: inspected.meta.origin }),
-            ...(inspected.meta.delegationDepth === undefined ? {} : { delegationDepth: inspected.meta.delegationDepth }),
-          }]),
-      inspect: async () => inspected,
-    },
+    sessionPersistence,
     agentPresets: {
       mount: async (_agentCtx, presetId) => { mounts.push(presetId) },
     },
@@ -90,7 +121,10 @@ function makeCtx(storagePath, historyPath, configTasks, options = {}) {
     coldWake: options.coldWake ?? true,
   }))
   const emit = (event, ...args) => listeners.get(event)?.(...args)
-  return { ctx, fired, tools, routes, disposers, mockAgent, mockSession, emit, roots, resumes, mounts, selections }
+  return {
+    ctx, fired, tools, routes, disposers, mockAgent, mockSession, emit, roots, resumes, mounts, selections,
+    persistenceOpens, persistenceReads, persistenceCloses, persistenceInspects, warnings,
+  }
 }
 
 async function callHttp(route, method, payload) {
@@ -308,6 +342,7 @@ const strict = makeCtx(join(strictDir, 'tasks.json'), join(strictDir, 'history.j
       { type: 'agent-preset/selected', data: { agentPreset: 'coding' } },
     ],
   },
+  persistenceApi: 'handle',
 })
 await new Promise((r) => setTimeout(r, 4200))
 assert.equal(otherFired.length, 0, 'unrelated live root never receives bound task')
@@ -315,10 +350,74 @@ assert.equal(strict.resumes.length, 1, 'cold owner resumed exactly once')
 assert.equal(String(strict.resumes[0].resumeSessionId), 'sess-owner')
 assert.deepEqual(strict.resumes[0].agentOptions, { provider: 'saved-provider', model: 'saved-model' })
 assert.deepEqual(strict.mounts, ['coding'], 'latest persisted preset projection is mounted')
+assert.deepEqual(strict.persistenceOpens, [{ id: 'sess-owner', access: 'read' }], 'snapshot.header id opens a read handle')
+assert.deepEqual(strict.persistenceReads, ['sess-owner'], 'cold resume reads the handle')
+assert.deepEqual(strict.persistenceCloses, ['sess-owner'], 'cold resume always closes the handle')
+assert.deepEqual(strict.persistenceInspects, [], 'new handle API does not call legacy inspect')
 assert.equal(strict.fired.length, 1, 'resumed owner receives task')
-console.log('✓ strict cold owner delivery with saved model')
+console.log('✓ strict cold owner delivery uses snapshot.header and closes the read handle')
 strict.disposers.forEach((d) => d?.())
 rmSync(strictDir, { recursive: true, force: true })
+
+// --- Core 0.1.1/0.1.2 fallback retains legacy list headers + inspect
+const legacyDir = mkdtempSync(join(tmpdir(), 'dsh-cron-legacy-inspect-'))
+const legacy = makeCtx(join(legacyDir, 'tasks.json'), join(legacyDir, 'history.jsonl'), [
+  { id: 'legacy', prompt: 'legacy owner', at: past, sessionId: 'sess-legacy' },
+], {
+  roots: [otherAgent],
+  persistenceApi: 'inspect',
+  inspected: {
+    meta: { id: 'sess-legacy', cwd: 'C:\\legacy', agentPreset: 'standard' },
+    events: [],
+  },
+})
+await new Promise((r) => setTimeout(r, 2200))
+assert.deepEqual(legacy.persistenceInspects, ['sess-legacy'], 'legacy inspect fallback is called')
+assert.deepEqual(legacy.persistenceOpens, [], 'legacy persistence does not require open')
+assert.equal(legacy.resumes.length, 1)
+assert.equal(legacy.fired.length, 1)
+legacy.disposers.forEach((d) => d?.())
+rmSync(legacyDir, { recursive: true, force: true })
+console.log('✓ legacy persistence list header + inspect fallback remains supported')
+
+// --- a failed handle read still releases the read handle in finally
+const closeDir = mkdtempSync(join(tmpdir(), 'dsh-cron-handle-close-'))
+const closeFailure = makeCtx(join(closeDir, 'tasks.json'), join(closeDir, 'history.jsonl'), [
+  { id: 'close-on-error', prompt: 'must close', at: past, sessionId: 'sess-close' },
+], {
+  roots: [otherAgent],
+  persistenceApi: 'handle',
+  persistenceReadError: new Error('read failed'),
+  inspected: { meta: { id: 'sess-close', cwd: 'C:\\workspace' }, events: [] },
+})
+await new Promise((r) => setTimeout(r, 2200))
+assert.ok(closeFailure.persistenceReads.length >= 1, 'overdue task retries its failed read')
+assert.equal(closeFailure.persistenceCloses.length, closeFailure.persistenceReads.length, 'every failed read closes its handle')
+assert.ok(closeFailure.persistenceCloses.every((id) => id === 'sess-close'))
+assert.equal(closeFailure.resumes.length, 0)
+assert.equal(closeFailure.fired.length, 0)
+closeFailure.disposers.forEach((d) => d?.())
+rmSync(closeDir, { recursive: true, force: true })
+console.log('✓ handle read failure closes the read handle')
+
+// --- close failure invalidates the cold read; never resume from an unreleased handle
+const closeErrorDir = mkdtempSync(join(tmpdir(), 'dsh-cron-close-error-'))
+const closeError = makeCtx(join(closeErrorDir, 'tasks.json'), join(closeErrorDir, 'history.jsonl'), [
+  { id: 'close-error', prompt: 'must not resume', at: past, sessionId: 'sess-close-error' },
+], {
+  roots: [otherAgent],
+  persistenceApi: 'handle',
+  persistenceCloseError: new Error('close failed'),
+  inspected: { meta: { id: 'sess-close-error', cwd: 'C:\\workspace' }, events: [] },
+})
+await new Promise((r) => setTimeout(r, 2200))
+assert.ok(closeError.persistenceCloses.length >= 1, 'close is attempted on every cold read')
+assert.equal(closeError.resumes.length, 0, 'close failure prevents resume')
+assert.equal(closeError.fired.length, 0, 'close failure leaves the task overdue')
+assert.ok(closeError.warnings.some((warning) => warning.includes('cannot inspect bound session "sess-close-error": close failed')))
+closeError.disposers.forEach((d) => d?.())
+rmSync(closeErrorDir, { recursive: true, force: true })
+console.log('✓ handle close failure aborts cold resume and is logged')
 
 // --- durable subagent ownership is never promoted through cold resume
 for (const lineage of [

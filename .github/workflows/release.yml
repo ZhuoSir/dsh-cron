@@ -11,8 +11,6 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    env:
-      DSH_CORE_PATH: ${{ github.workspace }}/dsh-rc1
     steps:
       - uses: actions/checkout@v6
         with:
@@ -22,6 +20,12 @@ jobs:
           repository: deepseek-ai/deepseek-harness
           ref: a66e4702047846cdaa10c66c9d3df3951f5ea70d
           path: dsh-rc1
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: d347e703908d0406b7a7ef80e3a0e594d86b2215
+          path: dsh-013-alpha1
           persist-credentials: false
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
@@ -35,8 +39,14 @@ jobs:
           test "$GITHUB_REF_NAME" = "v$version"
           test "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" = tag
       - run: pnpm install --frozen-lockfile
-      - name: Verify exact rc.1 source and package
+      - name: Verify package and exact rc.1 source
+        env:
+          DSH_CORE_PATH: ${{ github.workspace }}/dsh-rc1
         run: pnpm verify
+      - name: Verify exact 0.1.3-alpha.1 source
+        env:
+          DSH_CORE_PATH: ${{ github.workspace }}/dsh-013-alpha1
+        run: pnpm test:core
       - run: mkdir artifacts
       - run: pnpm pack --pack-destination artifacts
       - name: Write and verify SHA-256 manifest

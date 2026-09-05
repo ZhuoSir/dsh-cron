@@ -722,6 +722,29 @@ export function apply(ctx, config) {
     return preset
   }
 
+  /** Read one cold Session across the Core 0.1.1/0.1.2 inspect and 0.1.3 handle seams. */
+  async function inspectPersistedSession(sessionId) {
+    const persistence = ctx.sessionPersistence
+    const listed = await persistence.list()
+    const snapshot = listed.find((candidate) => String(candidate?.header?.id ?? candidate?.id) === sessionId)
+    const header = snapshot?.header ?? snapshot
+    if (!header?.cwd) return null
+    if (header.origin === 'subagent' || Number(header.delegationDepth ?? 0) > 0) {
+      logger.warn(`cron: bound session "${sessionId}" is subagent-owned; refusing cold resume`)
+      return null
+    }
+    if (typeof persistence.open === 'function') {
+      const handle = await persistence.open(header.id, 'read')
+      try {
+        return { meta: handle.header, events: await handle.read() }
+      } finally {
+        await handle.close()
+      }
+    }
+    if (typeof persistence.inspect === 'function') return persistence.inspect(header.id)
+    throw new Error('session persistence exposes neither open nor inspect')
+  }
+
   /** One in-flight resume per Session prevents duplicate cold agents. */
   const resumes = new Map()
 
@@ -732,13 +755,8 @@ export function apply(ctx, config) {
     const operation = (async () => {
       let inspected
       try {
-        const header = (await ctx.sessionPersistence.list()).find((candidate) => String(candidate.id) === sessionId)
-        if (!header?.cwd) return null
-        if (header.origin === 'subagent' || Number(header.delegationDepth ?? 0) > 0) {
-          logger.warn(`cron: bound session "${sessionId}" is subagent-owned; refusing cold resume`)
-          return null
-        }
-        inspected = await ctx.sessionPersistence.inspect(header.id)
+        inspected = await inspectPersistedSession(sessionId)
+        if (inspected === null) return null
       } catch (error) {
         logger.warn(`cron: cannot inspect bound session "${sessionId}": ${error?.message ?? error}`)
         return null

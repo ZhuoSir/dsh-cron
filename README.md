@@ -1,10 +1,10 @@
 # dsh-cron
 
-> 此 fork 面向受控 DSH 0.1.1-rc.2 及官方 Core 0.1.2-rc.1 提供严格的既有 Session 自动化：绑定任务在 Session 冷却时恢复原 Session，绝不回退到其他 Session；支持 IANA 时区，并让 Session Header 抽屉只显示当前 Session 的任务和历史。
+> 此 fork 面向受控 DSH 0.1.1-rc.2、官方 Core 0.1.2-rc.1 及 0.1.3-alpha.1 提供严格的既有 Session 自动化：绑定任务在 Session 冷却时恢复原 Session，绝不回退到其他 Session；支持 IANA 时区，并让 Session Header 抽屉只显示当前 Session 的任务和历史。
 
 > 定时任务插件：让 DeepSeek Harness 在指定时间自动执行任务——到点把任务提示注入会话，Agent 被唤醒后自动执行并在会话中回复结果。自带 Web 管理抽屉（任务列表 + 执行记录）。
 
-[![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/plugins/zhuosir/dsh-cron) ![许可证](https://img.shields.io/badge/license-MIT-blue) ![DSH](https://img.shields.io/badge/dsh-0.1.2--rc.1-blueviolet) ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green)
+[![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/plugins/zhuosir/dsh-cron) ![许可证](https://img.shields.io/badge/license-MIT-blue) ![DSH](https://img.shields.io/badge/dsh-0.1.3--alpha.1-blueviolet) ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green)
 
 **English summary**: Scheduled tasks for DeepSeek Harness. Create tasks in chat with natural language ("every Monday 9am remind me…"), the agent converts them to `at` / `every` / `daily` / 5-field `cron` rules, fires them back into the session that created them, and replies with results in conversation. Ships a right-side drawer in the Web UI (task list + run history). MIT licensed with no install scripts; scheduled prompts use the owning Session's configured model provider.
 
@@ -19,7 +19,7 @@
 **从 GitHub 安装（推荐使用已验证的不可变 tag）**：
 
 ```sh
-dsh plugin --profile web add github:cloga/dsh-cron#v0.4.1
+dsh plugin --profile web add github:cloga/dsh-cron#v0.4.2
 ```
 
 不带 tag 的 `github:cloga/dsh-cron` 会跟随移动的默认分支，只用于开发，不作为部署验证证据。
@@ -28,7 +28,7 @@ dsh plugin --profile web add github:cloga/dsh-cron#v0.4.1
 
 ```sh
 dsh plugin --profile web add ./dsh-cron            # 本地目录（开发用 link）
-dsh plugin --profile web add ./dsh-cron-0.4.1.tgz  # pnpm pack 产物
+dsh plugin --profile web add ./dsh-cron-0.4.2.tgz  # pnpm pack 产物
 ```
 
 **验证与卸载**：
@@ -107,13 +107,13 @@ HTTP API 通过可选注入挂载（`ctx.inject(['webServer','webRuntime'])`）�
 | **安装脚本** | ❌ 无 `prepare`/`postinstall` 等任何安装期脚本 | 无（GitHub 安装不需要构建授权） |
 | **Shell / 系统命令** | ⚠️ 仅用于系统通知：macOS 调 `osascript -e 'display notification …'`、Linux 调 `notify-send`；可用 `systemNotify: false` 完全关闭 | 低；命令固定无注入面（参数经 JSON 转义） |
 
-可靠性设计：任务运行记录持久化（重启不重发，遗留 `delivered`/`running` 记录转为 `interrupted`）、`daily` 错过补发一次、所有回调入口有防崩溃包裹（插件故障不会拖垮宿主进程）。会话绑定严格固定：目标 Session 无法恢复时保留逾期任务并在后续 tick 重试，绝不投递到其他 Session；持久化 header 标记为 `origin: subagent` 或 `delegationDepth > 0` 时拒绝 cold resume。
+可靠性设计：任务运行记录持久化（重启不重发，遗留 `delivered`/`running` 记录转为 `interrupted`）、`daily` 错过补发一次、所有回调入口有防崩溃包裹（插件故障不会拖垮宿主进程）。会话绑定严格固定：目标 Session 无法恢复时保留逾期任务并在后续 tick 重试，绝不投递到其他 Session；持久化 header 标记为 `origin: subagent` 或 `delegationDepth > 0` 时拒绝 cold resume。Core 0.1.3-alpha.1 使用 `list()` snapshot 的 `snapshot.header`，再以 `open(id, 'read')` / `handle.read()` 读取，并在 `finally` 中关闭 handle；旧 Core 仅在运行时 API 形状没有 `open()` 时回退到 header 列表与 `inspect()`，不会把新接口的读取或关闭错误降级为旧接口。若 `handle.close()` 失败，本次 cold resume 失败并保留逾期任务供后续 tick 重试。
 
 ## 兼容性
 
 | 项目 | 要求 |
 |---|---|
-| DeepSeek Harness | 受控 `0.1.1-rc.2`；官方 `0.1.2-rc.1` 精确 commit `a66e4702047846cdaa10c66c9d3df3951f5ea70d`；peer range 排除未验证的 `0.1.2` stable |
+| DeepSeek Harness | 受控 `0.1.1-rc.2`；官方 `0.1.2-rc.1`；官方 `0.1.3-alpha.1` 精确 commit `d347e703908d0406b7a7ef80e3a0e594d86b2215`；peer range 仅包含这些已验证发布线 |
 | Node.js | `^22.19.0 || >=24.0.0` |
 | 平台 | macOS 已实测（含原生通知）；Linux 预期可用（通知需 `notify-send`）；Windows 调度/面板可用但无原生通知 |
 | 浏览器 | 跟随 DSH Web 壳（现代浏览器，React 18 运行时由壳提供） |
@@ -135,12 +135,12 @@ HTTP API 通过可选注入挂载（`ctx.inject(['webServer','webRuntime'])`）�
 pnpm install
 pnpm build        # tsdown 直接产出 __ModuleLoader__ 格式；watch 与一次性 build 完全一致
 pnpm typecheck
-pnpm test         # host ownership/restart + client bundle/DOM + rc.1 source 兼容
-DSH_CORE_PATH=/path/to/dsh-rc1 pnpm test:core  # 要求官方 rc.1 精确 commit
+pnpm test         # host ownership/restart + client bundle/DOM + Core 兼容
+DSH_CORE_PATH=/path/to/dsh-0.1.3-alpha.1 pnpm test:core  # 校验官方 alpha.1 精确 commit 与 handle API
 pnpm verify       # typecheck + build + tests + freshness/pack smoke
 ```
 
-开发依赖保留在可用的受控 `0.1.1-rc.2` 编译闭包；官方 feed 尚未提供全部 rc.1 子包。发布前设置 `DSH_CORE_PATH` 指向官方 rc.1 source checkout；`test:core` 校验精确 commit，并区分 live `Session.snapshotEvents()` / `ownEvents()` / `eventAt()` 与冷态 `SessionInspection.events`。Host 所有权、HTTP 所有权、重启恢复、Client 注册/交互及打包新鲜度分别由 `host.test.mjs`、`client.test.mjs`、`toast-render.test.mjs`、`core-compat.test.mjs` 和 `package.test.mjs` 覆盖。
+开发依赖保留在可用的受控 `0.1.1-rc.2` 编译闭包。发布前设置 `DSH_CORE_PATH` 指向官方 `0.1.2-rc.1` 或 `0.1.3-alpha.1` source checkout；`test:core` 校验对应精确 commit，并验证旧 `inspect()` seam 或 alpha.1 的 snapshot + read handle seam。Host 所有权、HTTP 所有权、重启恢复、Client 注册/交互及打包新鲜度分别由 `host.test.mjs`、`client.test.mjs`、`toast-render.test.mjs`、`core-compat.test.mjs` 和 `package.test.mjs` 覆盖。
 
 **结构**：单 npm 包、host/client 双半——host（`index.js`）：调度器 + 工具 + `/cron/api` 路由 + 历史采集；client（`src/client/` → `lib/client.js`）：会话头部按钮 + 右侧抽屉。
 

@@ -15,10 +15,20 @@ assert.equal((client.match(/window\.__ModuleLoader__\.load\(/g) ?? []).length, 1
 assert.match(client, /^window\.__ModuleLoader__\.load\(\{ id: "dsh-cron", factory: \(require\) => \{/)
 assert.match(client, /return module\.exports; \} \}\);\s*$/)
 
+const ciWorkflow = readFileSync(join(root, '.github', 'workflows', 'ci.yml'), 'utf8').replaceAll('\r\n', '\n')
 const releaseWorkflow = readFileSync(join(root, '.github', 'workflows', 'release.yml'), 'utf8').replaceAll('\r\n', '\n')
+for (const marker of [
+  'a66e4702047846cdaa10c66c9d3df3951f5ea70d',
+  'd347e703908d0406b7a7ef80e3a0e594d86b2215',
+  'ref: ${{ matrix.core.ref }}',
+  'DSH_CORE_PATH: ${{ github.workspace }}/dsh-core',
+]) assert.ok(ciWorkflow.includes(marker), `CI workflow omits ${marker}`)
 for (const marker of [
   "tags:\n      - 'v*'",
   'a66e4702047846cdaa10c66c9d3df3951f5ea70d',
+  'd347e703908d0406b7a7ef80e3a0e594d86b2215',
+  'DSH_CORE_PATH: ${{ github.workspace }}/dsh-rc1',
+  'DSH_CORE_PATH: ${{ github.workspace }}/dsh-013-alpha1',
   'git cat-file -t "refs/tags/$GITHUB_REF_NAME"',
   'pnpm install --frozen-lockfile',
   'pnpm verify',
@@ -47,12 +57,16 @@ const output = mkdtempSync(join(tmpdir(), 'dsh-cron-pack-'))
 try {
   const pnpmCli = process.env.npm_execpath
   assert.ok(pnpmCli, 'verify:package must run through pnpm')
-  execFileSync(process.execPath, [pnpmCli, 'pack', '--pack-destination', output], {
+  const isJavaScriptCli = /\.(?:cjs|mjs|js)$/i.test(pnpmCli)
+  execFileSync(isJavaScriptCli ? process.execPath : pnpmCli, [
+    ...(isJavaScriptCli ? [pnpmCli] : []),
+    'pack', '--pack-destination', output,
+  ], {
     cwd: root,
     stdio: 'inherit',
   })
-  const tarball = readdirSync(output).find((name) => name === 'dsh-cron-0.4.1.tgz')
-  assert.equal(tarball, 'dsh-cron-0.4.1.tgz')
+  const tarball = readdirSync(output).find((name) => name === 'dsh-cron-0.4.2.tgz')
+  assert.equal(tarball, 'dsh-cron-0.4.2.tgz')
   const tar = process.platform === 'win32' ? join(process.env.SystemRoot, 'System32', 'tar.exe') : 'tar'
   const listing = execFileSync(tar, ['-tf', join(output, tarball)], { encoding: 'utf8' })
   for (const required of [
