@@ -84,7 +84,19 @@ HTTP API 通过可选注入挂载（`ctx.inject(['webServer','webRuntime'])`）�
 
 ## Web 面板与通知
 
-会话头部右侧的「🕐 定时任务」按钮（带任务数与未读徽标）打开右侧抽屉：**任务 Tab**（查看/编辑/立即执行/暂停/删除）与**执行记录 Tab**（每次触发的状态、耗时、结果摘要）。
+会话头部右侧的「定时任务」按钮保留任务数与未读徽标。面板包含 **任务**（查看/编辑/立即执行/暂停/删除）与 **执行记录**（每次触发的状态、耗时、结果摘要）。
+
+### 可选 Better Sidebar 集成（开发分支，尚未包含在 v0.4.2 tag）
+
+- 检测到兼容的 Better Sidebar Client Service 时，Cron 注册独立的「定时任务」标签页。仅改 Cron，不需要修改或强制安装 Better Sidebar。
+- 头部按钮和当前会话通知直接定位到标签页；已有标签页会复用。通过公开 `createTab` 补丁展开其所在的右侧/底部面板；窄屏展开合并抽屉；已分离的浮窗不会额外展开其他面板。
+- 适配器按 Better Sidebar **0.18.0** 的公开 `registerTab` / `createTab` / `openTab` 合同实现，并检查版本及 `targetedOpen` / `floatWindows` 能力。不导入 Sidebar 的私有组件、样式、按钮或运行时模块。
+- 未安装、版本不支持、标签页被禁用或服务卸载时，入口回退到独立面板。独立面板使用浏览器原生 modal dialog/top layer，支持 Escape、外部点击关闭、焦点恢复，不再通过超大 `z-index` 与侧栏争抢层级。
+- 标签页使用 Sidebar 提供的 Session scope；任务、历史、选择的子页和徽标按 Session 隔离。隐藏的标签页停止面板轮询；切换会话时重新初始化活动通知基线，忽略过期面板响应。
+- 来自其他会话的旧通知打开标明原 Session 的独立面板，不将原会话任务塞进当前会话的侧栏，也不静默切换用户会话。
+- 通知开关及测试按钮归入「通知设置」，避免挤占面板标题栏。调度器、存储及 Host API 授权边界保持不变。
+
+安装新的构建产物后，仍需按上面的安全激活流程使 Client bundle 生效；修改工作树本身不会更新正在运行的 GUI。
 
 **四级通知**（按覆盖范围递增）：
 
@@ -122,7 +134,7 @@ HTTP API 通过可选注入挂载（`ctx.inject(['webServer','webRuntime'])`）�
 | 主题 | 使用当前公开的 DSH background / label / border / state tokens；亮色和暗色均经过浏览器验证，token 缺失时回退到 `color-scheme` 感知的系统色 |
 | pnpm | 开发与发布固定 `pnpm@11.7.0`；安装使用不运行构建脚本 |
 
-与其他插件共存：会话头部使用 `order: -50` 与 dsh-session-manager 的按钮（-40/-30/-10）相邻。
+与其他插件共存：开发分支提供上述 Better Sidebar 可选集成，修复独立抽屉与侧栏控件的层叠冲突；会话头部继续使用 `order: -50` 与 dsh-session-manager 的按钮（-40/-30/-10）相邻。
 
 ### Better Sidebar 收回按钮兼容修复（v0.4.3）
 
@@ -151,8 +163,14 @@ pnpm test         # host ownership/restart + client bundle/DOM + Core 兼容
 DSH_CORE_PATH=/path/to/dsh-0.1.3-alpha.1 pnpm test:core  # 校验官方 alpha.1 精确 commit 与 handle API
 pnpm verify       # typecheck + build + tests + freshness/pack smoke
 pnpm exec playwright install chromium   # 首次浏览器回归测试
-pnpm test:sidebar # CSS 优先级、展开/收回、键盘、窄屏、卸载回归；CI 单独运行
+pnpm test:sidebar # 收回按钮兼容 + Cron 标签页/dialog/焦点/通知/窄屏；CI 单独运行
 ```
+
+可选的额外验证（不会访问真实任务 API 或修改正在运行的 GUI）：
+
+- `node tests/sidebar-contract.test.mjs`：先设置 `DSH_BETTER_SIDEBAR_PATH` 指向带 `src/client` 的 Better Sidebar **0.18.0** 包目录；使用真实 Sidebar reducer 和 Cordis 验证去重、嵌套分屏、浮窗、会话定位及可选服务装卸。
+- `node tests/browser.test.mjs`：也可单独运行已纳入 `pnpm test:sidebar` 的交互测试；使用开发依赖 `@playwright/test` 与已安装的 Chromium，可用 `DSH_PLAYWRIGHT_MODULE` 指向已有 `playwright/index.mjs`，用 `DSH_CHROMIUM_EXECUTABLE` 指定已有浏览器可执行文件。测试使用隔离的 React 页面和模拟 Sidebar 容器，验证原生 modal、焦点、通知点击及亮/暗/窄屏布局，不等同于当前 GUI 的部署验证。
+- 浏览器截图及结果默认写入临时目录，或用 `DSH_BROWSER_ARTIFACTS` 指定输出目录。这些测试工具无需成为 Cron 的运行时依赖。
 
 开发依赖保留在可用的受控 `0.1.1-rc.2` 编译闭包。发布前设置 `DSH_CORE_PATH` 指向官方 `0.1.2-rc.1` 或 `0.1.3-alpha.1` source checkout；`test:core` 校验对应精确 commit，并验证旧 `inspect()` seam 或 alpha.1 的 snapshot + read handle seam。Host 所有权、HTTP 所有权、重启恢复、Client 注册/交互及打包新鲜度分别由 `host.test.mjs`、`client.test.mjs`、`toast-render.test.mjs`、`core-compat.test.mjs` 和 `package.test.mjs` 覆盖。
 

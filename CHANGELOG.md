@@ -2,6 +2,11 @@
 
 ## 0.4.3
 
+- Register a session-scoped Cron tab through the optional Better Sidebar 0.18 public client contract, without importing or changing Better Sidebar.
+- Reveal the owning right/bottom panel (or narrow drawer) on header/notification entry; reuse detached windows without opening unrelated panels.
+- Retain a native modal-dialog fallback for absent, unsupported, disabled or removed sidebar integration, avoiding cross-plugin stacking conflicts.
+- Isolate tab selection and badges by Session, re-prime notification watchers on owner changes, ignore stale panel responses, and stop hidden panel polling.
+- Group notification preferences in the panel header and add deterministic real-React/portal tests for fallback, session ownership, notifications and optional-service lifecycle.
 - Restore Better Sidebar's native collapse control when dsh-tauri's global left-sidebar hide rule matches its accessible label; scope the compatibility override to the Better Sidebar toggle cluster and keep cleanup lifecycle-owned.
 - Add browser cascade/interaction regression coverage for stylesheet order, narrow/desktop layouts, labels, and cleanup.
 

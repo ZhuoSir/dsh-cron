@@ -45,7 +45,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node tests/host.test.mjs && node tests/client.test.mjs && node tests/toast-render.test.mjs && node tests/core-compat.test.mjs",
     "test:core": "node tests/core-compat.test.mjs",
-    "test:sidebar": "node tests/sidebar-compat.test.mjs",
+    "test:sidebar": "node tests/sidebar-compat.test.mjs && node tests/browser.test.mjs",
     "verify:package": "node tests/package.test.mjs",
     "verify": "pnpm typecheck && pnpm build && pnpm test && pnpm verify:package"
   },

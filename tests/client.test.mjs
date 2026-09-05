@@ -27,6 +27,7 @@ console.log('✓ id:', regs[0].id, '| exports:', Object.keys(ex).join(','), '| i
 
 const registered = []
 const ctx = {
+  inject: () => {}, // no Better Sidebar service installed
   effect: () => {},
   locale: { register: () => () => {} },
   slots: {

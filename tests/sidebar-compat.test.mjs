@@ -6,6 +6,7 @@ import { chromium, expect } from '@playwright/test'
 const bundle = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
 const browser = await chromium.launch({
   headless: true,
+  ...(process.env.DSH_CHROMIUM_EXECUTABLE ? { executablePath: process.env.DSH_CHROMIUM_EXECUTABLE } : {}),
   ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}),
 })
 // Verbatim dsh-tauri 0.6.7 selector: meant for the left column, but global.
@@ -52,6 +53,7 @@ try {
           window.mountCron = () => {
             const disposers = []
             plugin.apply({
+              inject: () => {}, // optional Sidebar service is absent in this CSS-only fixture
               effect: (fn) => { disposers.push(fn()) },
               locale: { register: () => () => {} },
               slots: { inject: () => () => {} },

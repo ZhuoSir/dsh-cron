@@ -6,10 +6,11 @@ export const styles = {
   triggerLabel: 'dsh-cron-triggerLabel',
   triggerActive: 'dsh-cron-trigger dsh-cron-triggerActive',
   count: 'dsh-cron-count',
-  mask: 'dsh-cron-mask',
-  maskOpen: 'dsh-cron-mask dsh-cron-maskOpen',
+  sidebarPanel: 'dsh-cron-sidebarPanel',
+  settings: 'dsh-cron-settings',
+  settingsBody: 'dsh-cron-settingsBody',
+  owner: 'dsh-cron-owner',
   drawer: 'dsh-cron-drawer',
-  drawerOpen: 'dsh-cron-drawer dsh-cron-drawerOpen',
   drawerHead: 'dsh-cron-drawerHead',
   drawerTitle: 'dsh-cron-drawerTitle',
   drawerClose: 'dsh-cron-drawerClose',
@@ -71,9 +72,9 @@ export const css = `
 }
 
 /* Local semantic tokens: current public DSH theme variables first, then
-   color-scheme-aware system colors when a host omits one. All three roots are
-   included because the trigger, drawer and toast stack live in separate Slots. */
-:where(.dsh-cron-trigger, .dsh-cron-drawer, .dsh-cron-toastStack) {
+   color-scheme-aware system colors when a host omits one. All plugin roots are
+   included because the trigger, sidebar panel, dialog and toasts have separate roots. */
+:where(.dsh-cron-trigger, .dsh-cron-drawer, .dsh-cron-sidebarPanel, .dsh-cron-toastStack) {
   --dsh-cron-bg-surface: var(--dsw-alias-bg-layer-1, Canvas);
   --dsh-cron-bg-control: var(--dsw-alias-bg-layer-2, color-mix(in srgb, CanvasText 8%, Canvas));
   --dsh-cron-bg-overlay: var(--dsw-alias-bg-overlay, color-mix(in srgb, CanvasText 14%, Canvas));
@@ -96,28 +97,32 @@ export const css = `
 .dsh-cron-triggerLabel { font-size: 12px; }
 .dsh-cron-count { margin: 0 2px; font-variant-numeric: tabular-nums; }
 
-/* mask + right drawer (rendered into shell.overlay, so fixed positioning is
-   relative to the viewport and nothing in the header can clip it) */
-.dsh-cron-mask {
-  position: fixed; inset: 0; z-index: 900; background: rgb(0 0 0 / 42%);
-  opacity: 0; pointer-events: none; transition: opacity .18s ease;
+/* Sidebar mode occupies its host pane, without a mask or viewport positioning. */
+.dsh-cron-sidebarPanel {
+  display: flex; flex-direction: column; width: 100%; height: 100%;
+  min-width: 0; min-height: 0; overflow: hidden;
+  background: var(--dsh-cron-bg-surface); color: var(--dsh-cron-label-primary);
 }
-.dsh-cron-maskOpen { opacity: 1; pointer-events: auto; }
+/* Standalone fallback uses the browser top layer, not a z-index arms race. */
 .dsh-cron-drawer {
-  position: fixed; top: 0; right: 0; bottom: 0; z-index: 901;
-  width: 560px; max-width: 94vw; box-sizing: border-box;
-  display: flex; flex-direction: column;
-  background: var(--dsh-cron-bg-surface);
-  color: var(--dsh-cron-label-primary);
-  border-left: 1px solid var(--dsh-cron-border);
+  position: fixed; inset: 0 0 0 auto; margin: 0; padding: 0;
+  width: 560px; max-width: 94vw; height: 100dvh; max-height: 100dvh;
+  box-sizing: border-box; overflow: hidden;
+  background: var(--dsh-cron-bg-surface); color: var(--dsh-cron-label-primary);
+  border: 0; border-left: 1px solid var(--dsh-cron-border);
   box-shadow: -8px 0 24px rgb(0 0 0 / 28%);
-  transform: translateX(103%); transition: transform .22s ease;
-  pointer-events: auto;
 }
-.dsh-cron-drawerOpen { transform: translateX(0); }
+.dsh-cron-drawer[open] { display: flex; flex-direction: column; }
+.dsh-cron-drawer::backdrop { background: rgb(0 0 0 / 42%); }
+.dsh-cron-settings { margin-left: auto; min-width: 0; }
+.dsh-cron-settings > summary { list-style: none; }
+.dsh-cron-settings > summary::-webkit-details-marker { display: none; }
+.dsh-cron-settingsBody { display: flex; flex-wrap: wrap; gap: 4px; padding-top: 6px; }
+.dsh-cron-settingsBody [aria-pressed="true"] { background: var(--dsh-cron-bg-interactive); font-weight: 600; }
+.dsh-cron-owner { flex: none; padding: 4px 12px; font-size: 11px; color: var(--dsh-cron-label-tertiary); overflow-wrap: anywhere; }
 .dsh-cron-drawerHead {
-  flex: none; display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 14px; border-bottom: 1px solid var(--dsh-cron-border);
+  flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 10px 12px; border-bottom: 1px solid var(--dsh-cron-border);
 }
 .dsh-cron-drawerTitle { font-size: 13px; font-weight: 600; color: var(--dsh-cron-label-primary); }
 .dsh-cron-drawerClose {
@@ -145,7 +150,7 @@ export const css = `
 }
 .dsh-cron-tab:hover { color: var(--dsh-cron-label-secondary); }
 .dsh-cron-tabActive { color: var(--dsh-cron-label-primary); background: var(--dsh-cron-bg-interactive); font-weight: 600; }
-.dsh-cron-body { flex: 1; overflow: auto; padding: 6px; }
+.dsh-cron-body { flex: 1; min-height: 0; min-width: 0; overflow: auto; padding: 6px; }
 .dsh-cron-list { display: flex; flex-direction: column; gap: 4px; }
 .dsh-cron-empty { padding: 18px 10px; text-align: center; font-size: 12px; color: var(--dsh-cron-label-tertiary); }
 .dsh-cron-row {
@@ -154,7 +159,7 @@ export const css = `
 }
 .dsh-cron-row:hover { background: var(--dsh-cron-bg-interactive); }
 .dsh-cron-rowDisabled { opacity: .55; }
-.dsh-cron-rowHead { display: flex; align-items: center; gap: 6px; }
+.dsh-cron-rowHead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .dsh-cron-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; }
 .dsh-cron-dotOn { background: var(--dsw-alias-state-success-primary, #22c55e); }
 .dsh-cron-dotOff { background: var(--dsh-cron-label-caption); }
@@ -215,7 +220,7 @@ export const css = `
 }
 .dsh-cron-trigger { position: relative; }
 .dsh-cron-toastStack {
-  position: fixed; top: 56px; right: 16px; z-index: 2147483647; /* int32 max: dsh-better-sidebar floats at 2147483000 */
+  position: fixed; top: 56px; right: 16px; z-index: 90; /* above workbench (25), below app menus (100+); modal toasts live inside the dialog */
   display: flex; flex-direction: column; gap: 8px; pointer-events: none;
 }
 .dsh-cron-toast {
