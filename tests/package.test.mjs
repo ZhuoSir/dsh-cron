@@ -32,6 +32,8 @@ for (const marker of [
   'git cat-file -t "refs/tags/$GITHUB_REF_NAME"',
   'pnpm install --frozen-lockfile',
   'pnpm verify',
+  'pnpm exec playwright install --with-deps chromium',
+  'pnpm test:sidebar',
   'pnpm pack --pack-destination artifacts',
   'sha256sum -- *.tgz > SHA256SUMS',
   'sha256sum --check SHA256SUMS',
@@ -65,8 +67,9 @@ try {
     cwd: root,
     stdio: 'inherit',
   })
-  const tarball = readdirSync(output).find((name) => name === 'dsh-cron-0.4.2.tgz')
-  assert.equal(tarball, 'dsh-cron-0.4.2.tgz')
+  const expectedTarball = `${manifest.name}-${manifest.version}.tgz`
+  const tarball = readdirSync(output).find((name) => name === expectedTarball)
+  assert.equal(tarball, expectedTarball)
   const tar = process.platform === 'win32' ? join(process.env.SystemRoot, 'System32', 'tar.exe') : 'tar'
   const listing = execFileSync(tar, ['-tf', join(output, tarball)], { encoding: 'utf8' })
   for (const required of [

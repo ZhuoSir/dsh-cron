@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.3
 
 - Restore Better Sidebar's native collapse control when dsh-tauri's global left-sidebar hide rule matches its accessible label; scope the compatibility override to the Better Sidebar toggle cluster and keep cleanup lifecycle-owned.
 - Add browser cascade/interaction regression coverage for stylesheet order, narrow/desktop layouts, labels, and cleanup.

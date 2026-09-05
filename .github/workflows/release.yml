@@ -47,6 +47,10 @@ jobs:
         env:
           DSH_CORE_PATH: ${{ github.workspace }}/dsh-013-alpha1
         run: pnpm test:core
+      - name: Verify sidebar browser regression
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          pnpm test:sidebar
       - run: mkdir artifacts
       - run: pnpm pack --pack-destination artifacts
       - name: Write and verify SHA-256 manifest

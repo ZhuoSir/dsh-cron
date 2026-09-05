@@ -19,8 +19,10 @@
 **从 GitHub 安装（推荐使用已验证的不可变 tag）**：
 
 ```sh
-dsh plugin --profile web add github:cloga/dsh-cron#v0.4.2
+dsh plugin --profile web add github:cloga/dsh-cron#v0.4.3
 ```
+
+已安装旧版时也使用上面的 `add` 命令切换到指定版本，无需先卸载。不要用不带版本的 `update` 代替固定 tag 升级。
 
 不带 tag 的 `github:cloga/dsh-cron` 会跟随移动的默认分支，只用于开发，不作为部署验证证据。
 
@@ -28,7 +30,7 @@ dsh plugin --profile web add github:cloga/dsh-cron#v0.4.2
 
 ```sh
 dsh plugin --profile web add ./dsh-cron            # 本地目录（开发用 link）
-dsh plugin --profile web add ./dsh-cron-0.4.2.tgz  # pnpm pack 产物
+dsh plugin --profile web add ./dsh-cron-0.4.3.tgz  # Release 下载或 pnpm pack 产物
 ```
 
 **验证与卸载**：
@@ -122,14 +124,14 @@ HTTP API 通过可选注入挂载（`ctx.inject(['webServer','webRuntime'])`）�
 
 与其他插件共存：会话头部使用 `order: -50` 与 dsh-session-manager 的按钮（-40/-30/-10）相邻。
 
-### Better Sidebar 收回按钮兼容修复（开发分支，尚未发布）
+### Better Sidebar 收回按钮兼容修复（v0.4.3）
 
 `dsh-tauri 0.6.7` 为隐藏左侧栏重复按钮，使用了全局 `Collapse sidebar` / `收起侧边栏` 标签选择器；它也会隐藏 `Better Sidebar 0.18.0` 展开后的同名右侧收回按钮（英文界面可复现）。本项目在 Client 样式中附带一个局部兼容覆盖，仅恢复 `[data-dsh-panel-host] [data-dsh-toggle-cluster]` 内匹配的原生按钮。
 
 - 原生展开/收回动作、标签页、编辑器及 Session 状态不变；左侧栏和底部面板不受影响。
 - 无需额外安装 Better Sidebar 依赖；未安装时选择器不匹配，不产生额外 UI。
 - 与 Cron 样式共同加载和卸载，不修改 DSH / Better Sidebar 的安装源码或用户配置。
-- 此修复尚不在上面的 `v0.4.2` tag 中；测试开发版本请先 `pnpm install && pnpm build`，再按本地目录方式安装，按安装章节说明在安全时机重启并刷新。仅修改本仓库不会自动更新正在运行的 Desktop。
+- 从 `v0.4.3` 起包含此修复；按安装章节固定版本安装，在安全时机重启并刷新。仅修改本仓库不会自动更新正在运行的 Desktop。
 - 待 dsh-tauri 将隐藏规则限定到左侧导航后可移除此覆盖。此项不是 Cron 标签页集成（另见 issue #15）。
 
 ## 工作原理
