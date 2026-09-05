@@ -19,7 +19,7 @@
 **从 GitHub 安装（推荐使用已验证的不可变 tag）**：
 
 ```sh
-dsh plugin --profile web add github:cloga/dsh-cron#v0.4.3
+dsh plugin --profile web add github:cloga/dsh-cron#v0.4.4
 ```
 
 已安装旧版时也使用上面的 `add` 命令切换到指定版本，无需先卸载。不要用不带版本的 `update` 代替固定 tag 升级。
@@ -30,7 +30,7 @@ dsh plugin --profile web add github:cloga/dsh-cron#v0.4.3
 
 ```sh
 dsh plugin --profile web add ./dsh-cron            # 本地目录（开发用 link）
-dsh plugin --profile web add ./dsh-cron-0.4.3.tgz  # Release 下载或 pnpm pack 产物
+dsh plugin --profile web add ./dsh-cron-0.4.4.tgz  # Release 下载或 pnpm pack 产物
 ```
 
 **验证与卸载**：
@@ -86,7 +86,9 @@ HTTP API 通过可选注入挂载（`ctx.inject(['webServer','webRuntime'])`）�
 
 会话头部右侧的「定时任务」按钮保留任务数与未读徽标。面板包含 **任务**（查看/编辑/立即执行/暂停/删除）与 **执行记录**（每次触发的状态、耗时、结果摘要）。
 
-### 可选 Better Sidebar 集成（开发分支，尚未包含在 v0.4.2 tag）
+### 可选 Better Sidebar 集成（从 v0.4.4 起）
+
+此功能虽在 PR #18 中合并，但不在不可变的 `v0.4.3` 中；`v0.4.4` 才是首次包含它的发布版本。Sidebar 的「Tasks」子代理面板与 Cron「定时任务」标签页是不同功能。
 
 - 检测到兼容的 Better Sidebar Client Service 时，Cron 注册独立的「定时任务」标签页。仅改 Cron，不需要修改或强制安装 Better Sidebar。
 - 头部按钮和当前会话通知直接定位到标签页；已有标签页会复用。通过公开 `createTab` 补丁展开其所在的右侧/底部面板；窄屏展开合并抽屉；已分离的浮窗不会额外展开其他面板。
@@ -134,7 +136,7 @@ HTTP API 通过可选注入挂载（`ctx.inject(['webServer','webRuntime'])`）�
 | 主题 | 使用当前公开的 DSH background / label / border / state tokens；亮色和暗色均经过浏览器验证，token 缺失时回退到 `color-scheme` 感知的系统色 |
 | pnpm | 开发与发布固定 `pnpm@11.7.0`；安装使用不运行构建脚本 |
 
-与其他插件共存：开发分支提供上述 Better Sidebar 可选集成，修复独立抽屉与侧栏控件的层叠冲突；会话头部继续使用 `order: -50` 与 dsh-session-manager 的按钮（-40/-30/-10）相邻。
+与其他插件共存：从 v0.4.4 起提供上述 Better Sidebar 可选集成，修复独立抽屉与侧栏控件的层叠冲突；会话头部继续使用 `order: -50` 与 dsh-session-manager 的按钮（-40/-30/-10）相邻。
 
 ### Better Sidebar 收回按钮兼容修复（v0.4.3）
 
@@ -152,6 +154,15 @@ HTTP API 通过可选注入挂载（`ctx.inject(['webServer','webRuntime'])`）�
 - 消息带有 `[cron]` 框架，明确告知模型这是自动化任务而非用户输入。
 - **执行记录关联**：注入的消息 id 与会话事件流（`session/event`）精确匹配——消息进入会话 → `running`，assistant 回复 → 截取摘要，`turn/end` → 按结束原因记 `completed`/`failed`。
 - 运行记录（`lastRunAt`/`firedAt`）、启停覆盖、执行历史均持久化，重启后不会重复触发已消费的时段；遗留非终态运行会转为 `interrupted`；`daily` 任务错过当天时段会补发一次。
+
+## 面向 Agent 的开发与发布
+
+代理开始工作先读 [`AGENTS.md`](AGENTS.md)，架构、测试层级和故障排查见 [`docs/agentic-readiness.md`](docs/agentic-readiness.md)。重要 PR 必须同时递增版本、更新 changelog 和安装说明；`release-ready` 汇总所有 CI，主分支通过后自动调用发布流程。**合并不等于发布，发布不等于本机已生效。** 代理需持续负责到不可变 Release、校验值和隔离安装验证完成，不能等用户再次提醒。流程及同一提交重试方法见 [`RELEASE.md`](RELEASE.md)。
+
+```sh
+pnpm test:release                  # 离线发布策略、故障恢复与工作流连接测试
+pnpm release:check --base origin/main # 提交候选变更后检查版本与安装说明
+```
 
 ## 开发
 

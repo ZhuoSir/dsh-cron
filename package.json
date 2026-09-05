@@ -1,6 +1,6 @@
 {
   "name": "dsh-cron",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Scheduled tasks for DeepSeek Harness: fire prompts into the owning root Session at a time, interval, or daily clock time, with a Web panel for tasks and run history.",
   "license": "MIT",
   "type": "module",
@@ -47,7 +47,9 @@
     "test:core": "node tests/core-compat.test.mjs",
     "test:sidebar": "node tests/sidebar-compat.test.mjs && node tests/browser.test.mjs",
     "verify:package": "node tests/package.test.mjs",
-    "verify": "pnpm typecheck && pnpm build && pnpm test && pnpm verify:package"
+    "test:release": "node --test tests/release-policy.test.mjs tests/publish-release.test.mjs tests/readiness.test.mjs",
+    "release:check": "node scripts/release-policy.mjs",
+    "verify": "pnpm typecheck && pnpm build && pnpm test && pnpm test:release && pnpm verify:package"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",

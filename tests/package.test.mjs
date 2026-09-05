@@ -24,12 +24,12 @@ for (const marker of [
   'DSH_CORE_PATH: ${{ github.workspace }}/dsh-core',
 ]) assert.ok(ciWorkflow.includes(marker), `CI workflow omits ${marker}`)
 for (const marker of [
-  "tags:\n      - 'v*'",
+  'workflow_call:',
   'a66e4702047846cdaa10c66c9d3df3951f5ea70d',
   'd347e703908d0406b7a7ef80e3a0e594d86b2215',
   'DSH_CORE_PATH: ${{ github.workspace }}/dsh-rc1',
   'DSH_CORE_PATH: ${{ github.workspace }}/dsh-013-alpha1',
-  'git cat-file -t "refs/tags/$GITHUB_REF_NAME"',
+  'node scripts/release-policy.mjs --plan',
   'pnpm install --frozen-lockfile',
   'pnpm verify',
   'pnpm exec playwright install --with-deps chromium',
@@ -37,7 +37,7 @@ for (const marker of [
   'pnpm pack --pack-destination artifacts',
   'sha256sum -- *.tgz > SHA256SUMS',
   'sha256sum --check SHA256SUMS',
-  'gh release create "$GITHUB_REF_NAME" artifacts/*.tgz artifacts/SHA256SUMS',
+  'node scripts/publish-release.mjs "${RELEASE_TAG#v}"',
 ]) assert.ok(releaseWorkflow.includes(marker), `release workflow omits ${marker}`)
 
 function filesUnder(path) {
