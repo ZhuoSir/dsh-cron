@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Require a new version for important changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: node scripts/release-policy.mjs --base "$BASE_SHA"
+
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ['22.19.0', '24']
+        core:
+          - name: rc1
+            ref: a66e4702047846cdaa10c66c9d3df3951f5ea70d
+          - name: alpha013
+            ref: d347e703908d0406b7a7ef80e3a0e594d86b2215
+    runs-on: ${{ matrix.os }}
+    env:
+      DSH_CORE_PATH: ${{ github.workspace }}/dsh-core
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: ${{ matrix.core.ref }}
+          path: dsh-core
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify
+      - name: Require the committed browser bundle to match source
+        run: git diff --exit-code -- lib/client.js
+
+  sidebar-browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:sidebar
+
+  # A stable required-check name: failure/cancellation in any matrix member
+  # must fail this gate, not become a skipped (and mergeable) required check.
+  release-ready:
+    if: ${{ always() }}
+    needs: [release-policy, verify, sidebar-browser]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every verification group to succeed
+        env:
+          NEEDS_RESULTS: ${{ toJSON(needs) }}
+        run: node -e 'const n=JSON.parse(process.env.NEEDS_RESULTS); if(Object.values(n).some(x=>x.result!=="success")) process.exit(1)'
+
+  publish:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'cloga/dsh-cron' }}
+    needs: [release-ready]
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml

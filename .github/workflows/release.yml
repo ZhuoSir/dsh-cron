@@ -1,0 +1,99 @@
+name: Release
+
+# Only the fully gated main CI caller may publish. Recovery reruns that exact
+# CI run; standalone dispatch/tag pushes would bypass Windows/Node 22 checks.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+# Serialize retries of the SAME commit without dropping another version.
+concurrency:
+  group: dsh-cron-release-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'cloga/dsh-cron' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      release: ${{ steps.plan.outputs.release }}
+      tag: ${{ steps.plan.outputs.tag }}
+      sha: ${{ steps.plan.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - id: plan
+        name: Determine exact version and refuse unreleased important changes
+        run: node scripts/release-policy.mjs --plan
+
+  release:
+    needs: [plan]
+    if: ${{ needs.plan.outputs.release == 'true' }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: a66e4702047846cdaa10c66c9d3df3951f5ea70d
+          path: dsh-rc1
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: d347e703908d0406b7a7ef80e3a0e594d86b2215
+          path: dsh-013-alpha1
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - run: pnpm install --frozen-lockfile
+      - name: Verify package and exact rc.1 source
+        env:
+          DSH_CORE_PATH: ${{ github.workspace }}/dsh-rc1
+        run: pnpm verify
+      - name: Verify exact 0.1.3-alpha.1 source
+        env:
+          DSH_CORE_PATH: ${{ github.workspace }}/dsh-013-alpha1
+        run: pnpm test:core
+      - name: Verify sidebar browser regression
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          pnpm test:sidebar
+      - name: Require the committed browser bundle to match source
+        run: git diff --exit-code -- lib/client.js
+      - run: mkdir artifacts
+      - run: pnpm pack --pack-destination artifacts
+      - name: Write and verify SHA-256 manifest
+        shell: bash
+        run: |
+          cd artifacts
+          sha256sum -- *.tgz > SHA256SUMS
+          sha256sum --check SHA256SUMS
+      # GITHUB_TOKEN-created tags do not start another workflow: publish here.
+      # Draft-first + digest checks allow identical retries, not replacement.
+      - name: Publish exact annotated tag and immutable GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+        shell: bash
+        run: node scripts/publish-release.mjs "${RELEASE_TAG#v}"

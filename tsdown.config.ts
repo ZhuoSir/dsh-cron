@@ -1,21 +1,30 @@
 import { defineConfig } from 'tsdown'
 
-// The client half ships as ONE CJS bundle wrapped by scripts/wrap-client.mjs
-// into the window.__ModuleLoader__.load({ id, factory }) format the web shell
-// serves at /plugins/dsh-cron/client.js. Everything the shell module table
-// provides stays external so the factory's `require` resolves against it.
+/**
+ * Build and watch share the same output contract: tsdown writes the complete
+ * ModuleLoader closure directly, so no post-build wrapper can be skipped by a
+ * watch rebuild.
+ */
+const externals = new Set(['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client'])
+const isExternal = (specifier: string): boolean => externals.has(specifier) || specifier.startsWith('@deepseek-ai/')
+
 export default defineConfig({
   entry: { client: 'src/client/index.tsx' },
   format: ['cjs'],
   platform: 'browser',
+  target: 'es2022',
   outDir: 'lib',
+  clean: false,
   minify: false,
   sourcemap: false,
-  external: [
-    'react',
-    'react/jsx-runtime',
-    'react-dom',
-    'react-dom/client',
-    /^@deepseek-ai\//,
-  ],
+  deps: {
+    neverBundle: isExternal,
+    alwaysBundle: specifier => !isExternal(specifier),
+  },
+  outputOptions: {
+    entryFileNames: 'client.js',
+    banner: 'window.__ModuleLoader__.load({ id: "dsh-cron", factory: (require) => {',
+    intro: 'var module = { exports: {} }; var exports = module.exports;',
+    footer: 'return module.exports; } });',
+  },
 })

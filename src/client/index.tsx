@@ -1,12 +1,12 @@
-// dsh-cron client half: a session-header trigger (rightmost) plus a right-side
-// drawer floating over the whole app via the `shell.overlay` slot — a dropdown
-// under the header gets clipped by the header's stacking context, a fixed
-// drawer does not. The panel talks to the host half over POST /cron/api/<method>.
+// Session-header entry + optional Better Sidebar tab, with a standalone dialog
+// fallback. The overlay owns one activity watcher; panel data stays session-scoped.
+// All business operations still use the existing POST /cron/api/<method> API.
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { zh, en } from './locale.js'
 import { css, styles } from './styles.js'
+import { CRON_TAB_ID, createSidebarTab, supportsSidebar, type SidebarService, type SidebarProps } from './sidebar.js'
 
 /** Services required from the client runtime. */
 export const inject = ['slots', 'locale']
@@ -31,9 +31,20 @@ interface ToastItem extends ToastEvent {
 }
 
 let drawerOpen = false
-let enabledCount = 0
-let unreadCount = 0
-let drawerTab: DrawerTab = 'tasks'
+let activeSessionId: string | null = null
+let drawerSessionId: string | null = null
+let sidebar: SidebarService | null = null
+interface SessionView { count: number; unread: number; tab: DrawerTab; visible: boolean }
+const sessionViews = new Map<string, SessionView>()
+function sessionView(sessionId: string | null): SessionView {
+  if (!sessionId) return { count: 0, unread: 0, tab: 'tasks', visible: false }
+  let view = sessionViews.get(sessionId)
+  if (!view) {
+    view = { count: 0, unread: 0, tab: 'tasks', visible: false }
+    sessionViews.set(sessionId, view)
+  }
+  return view
+}
 let toastSeq = 0
 let toasts: ToastItem[] = []
 const TOAST_MS = 8000
@@ -73,8 +84,8 @@ function setPref<K extends keyof Prefs>(key: K, value: Prefs[K]) {
 
 // useSyncExternalStore requires a cached snapshot: returning a fresh object
 // from getSnapshot causes an infinite render loop.
-interface DrawerSnapshot { open: boolean; count: number; unread: number; tab: DrawerTab; toasts: ToastItem[]; prefs: Prefs }
-let snapshot: DrawerSnapshot = { open: drawerOpen, count: enabledCount, unread: unreadCount, tab: drawerTab, toasts, prefs }
+interface DrawerSnapshot { open: boolean; sessionId: string | null; drawerSessionId: string | null; toasts: ToastItem[]; prefs: Prefs }
+let snapshot: DrawerSnapshot = { open: drawerOpen, sessionId: activeSessionId, drawerSessionId, toasts, prefs }
 const storeListeners = new Set<() => void>()
 
 function storeSubscribe(listener: () => void) {
@@ -83,39 +94,63 @@ function storeSubscribe(listener: () => void) {
 }
 
 function storeNotify() {
-  snapshot = { open: drawerOpen, count: enabledCount, unread: unreadCount, tab: drawerTab, toasts, prefs }
+  snapshot = { open: drawerOpen, sessionId: activeSessionId, drawerSessionId, toasts, prefs }
   for (const listener of storeListeners) listener()
+}
+
+function setActiveSession(sessionId: string | null) {
+  if (activeSessionId === sessionId) return
+  activeSessionId = sessionId
+  drawerOpen = false
+  storeNotify()
 }
 
 function setDrawerOpen(open: boolean) {
   if (drawerOpen === open) return
   drawerOpen = open
-  if (open) unreadCount = 0 // opening the drawer acknowledges the badge
+  if (open) sessionView(drawerSessionId).unread = 0
   storeNotify()
 }
 
-/** Open the drawer on a specific tab (e.g. a toast click opens history). */
-function openDrawer(tab: DrawerTab) {
-  drawerTab = tab
-  setDrawerOpen(true)
-}
-
-function setEnabledCount(count: number) {
-  if (enabledCount === count) return
-  enabledCount = count
+/** Prefer a visible sidebar destination; old-session notifications use a pinned
+ * fallback dialog rather than silently opening a tab in an invisible session. */
+function openDrawer(tab: DrawerTab, sessionId = activeSessionId) {
+  if (!sessionId) return
+  sessionView(sessionId).tab = tab
+  sessionView(sessionId).unread = 0
+  try {
+    if (sidebar?.isTabEnabled(CRON_TAB_ID) && sidebar.getSnapshot().sessionId === sessionId) {
+      sidebar.openTab({ type: CRON_TAB_ID }, { sessionId })
+      drawerOpen = false
+      storeNotify()
+      return
+    }
+  } catch (error) {
+    console.warn('[dsh-cron] sidebar open failed; using standalone panel', error)
+  }
+  drawerSessionId = sessionId
+  drawerOpen = true
   storeNotify()
 }
 
-/** New finished-run activity: bump the badge only while the drawer is closed. */
-function bumpUnread(by: number) {
-  if (drawerOpen || by === 0) return
-  unreadCount += by
+function setEnabledCount(count: number, sessionId: string) {
+  const view = sessionView(sessionId)
+  if (view.count === count) return
+  view.count = count
   storeNotify()
 }
 
-function setDrawerTab(tab: DrawerTab) {
-  if (drawerTab === tab) return
-  drawerTab = tab
+function bumpUnread(sessionId: string, by: number) {
+  const view = sessionView(sessionId)
+  if ((drawerOpen && drawerSessionId === sessionId) || view.visible || by === 0) return
+  view.unread += by
+  storeNotify()
+}
+
+function setDrawerTab(tab: DrawerTab, sessionId: string) {
+  const view = sessionView(sessionId)
+  if (view.tab === tab) return
+  view.tab = tab
   storeNotify()
 }
 
@@ -139,7 +174,7 @@ function useDrawerState() {
 interface TaskView {
   id: string
   prompt: string
-  schedule: { at?: string; everySeconds?: number; daily?: string; cron?: string }
+  schedule: { at?: string; everySeconds?: number; daily?: string; cron?: string; timeZone?: string }
   enabled: boolean
   origin: 'config' | 'dynamic'
   sessionId: string | null
@@ -150,10 +185,11 @@ interface TaskView {
 interface RunRecord {
   id: string
   taskId: string
+  sessionId?: string | null
   prompt: string
   scheduledFor: string
   firedAt: string
-  status: 'delivered' | 'running' | 'completed' | 'failed'
+  status: 'delivered' | 'running' | 'completed' | 'failed' | 'interrupted'
   startedAt?: number
   completedAt?: number
   endReason?: string
@@ -237,7 +273,7 @@ function sendBrowserNotification(event: ToastEvent) {
     const notification = new Notification(title, { body, tag: event.record.id })
     notification.onclick = () => {
       window.focus()
-      openDrawer('history')
+      openDrawer('history', event.record.sessionId ?? activeSessionId)
     }
   } catch { /* best effort */ }
 }
@@ -245,8 +281,11 @@ function sendBrowserNotification(event: ToastEvent) {
 /** Central fan-out for newly finished runs: toasts + badge + sound + system. */
 function notifyEvents(events: ToastEvent[]) {
   if (events.length === 0) return
-  bumpUnread(events.length)
-  for (const event of events) pushToast(event)
+  for (const event of events) {
+    const owner = event.record.sessionId ?? activeSessionId
+    if (owner) bumpUnread(owner, 1)
+    pushToast(event)
+  }
   if (prefs.sound) playChime(events.some((e) => e.kind === 'failed') ? 'failed' : 'completed')
   if (prefs.system) for (const event of events) sendBrowserNotification(event)
 }
@@ -262,7 +301,7 @@ function ToastCard({ t, item }: { t: T; item: ToastItem }) {
 
   const open = () => {
     dismissToast(item.key)
-    openDrawer('history')
+    openDrawer('history', item.record.sessionId ?? activeSessionId)
   }
 
   return (
@@ -279,16 +318,17 @@ function ToastCard({ t, item }: { t: T; item: ToastItem }) {
  * matter how many sessions are open. The first poll only primes the snapshot
  * (old records never toast).
  */
-function useCronWatcher(): void {
+function useCronWatcher(sessionId: string | null): void {
   const snapshotRef = useRef<Map<string, string> | null>(null)
 
   useEffect(() => {
     let stopped = false
+    snapshotRef.current = null // prime independently after every owner change
     console.info('[dsh-cron] watcher started (poll every %ds)', POLL_MS / 1000)
     const poll = async () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      if (!sessionId || typeof document !== 'undefined' && document.visibilityState === 'hidden') return
       try {
-        const { records } = await api<{ records: RunRecord[] }>('history', { limit: 20 })
+        const { records } = await api<{ records: RunRecord[] }>('history', { limit: 20, sessionId })
         if (stopped) return
         const prev = snapshotRef.current
         snapshotRef.current = new Map(records.map((r) => [r.id, r.status]))
@@ -299,7 +339,7 @@ function useCronWatcher(): void {
         const events = diffRecords(prev, records)
         if (events.length === 0) return
         console.info('[dsh-cron]', events.length, 'task run(s) finished:', events.map((e) => `${e.record.taskId}:${e.kind}`).join(', '))
-        notifyEvents(events)
+        notifyEvents(events.map(event => ({ ...event, record: { ...event.record, sessionId } })))
       } catch (error) {
         // API unreachable (host restarting?) — stay quiet, retry next poll.
         console.warn('[dsh-cron] watcher poll failed:', error)
@@ -311,7 +351,7 @@ function useCronWatcher(): void {
       stopped = true
       clearInterval(timer)
     }
-  }, [])
+  }, [sessionId])
 }
 
 function formatTime(iso: string | null | undefined): string {
@@ -329,8 +369,8 @@ function scheduleText(task: TaskView, t: T): string {
     if (seconds % 60 === 0) return t('schedule.every.minutes', { count: seconds / 60 })
     return t('schedule.every.seconds', { count: seconds })
   }
-  if (task.schedule.daily) return t('schedule.daily', { time: task.schedule.daily })
-  if (task.schedule.cron) return t('schedule.cron', { expr: task.schedule.cron })
+  if (task.schedule.daily) return t('schedule.daily', { time: task.schedule.daily, zone: task.schedule.timeZone ?? '' })
+  if (task.schedule.cron) return t('schedule.cron', { expr: task.schedule.cron, zone: task.schedule.timeZone ?? '' })
   return ''
 }
 
@@ -364,7 +404,7 @@ function ruleValueOf(task: TaskView): string {
 }
 
 /** Inline editor for one dynamic task (prompt + schedule rule). */
-function EditTaskForm({ t, task, onDone }: { t: T; task: TaskView; onDone: () => void }) {
+function EditTaskForm({ t, task, sessionId, onDone }: { t: T; task: TaskView; sessionId: string; onDone: () => void }) {
   const [form, setForm] = useState<EditFormState>({ prompt: task.prompt, rule: ruleOf(task), value: ruleValueOf(task) })
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -373,7 +413,7 @@ function EditTaskForm({ t, task, onDone }: { t: T; task: TaskView; onDone: () =>
     setBusy(true)
     setError('')
     try {
-      const payload: Record<string, unknown> = { id: task.id, prompt: form.prompt.trim() }
+      const payload: Record<string, unknown> = { id: task.id, prompt: form.prompt.trim(), sessionId }
       if (form.rule === 'daily') payload.daily = form.value.trim()
       else if (form.rule === 'every') payload.every = Number(form.value.trim())
       else if (form.rule === 'cron') payload.cron = form.value.trim()
@@ -434,39 +474,46 @@ function EditTaskForm({ t, task, onDone }: { t: T; task: TaskView; onDone: () =>
   )
 }
 
-function CronPanel({ t, tab, setTab }: { t: T; tab: DrawerTab; setTab: (tab: DrawerTab) => void }) {
+function CronPanel({ t, tab, setTab, sessionId, visible }: { t: T; tab: DrawerTab; setTab: (tab: DrawerTab) => void; sessionId: string; visible: boolean }) {
   const [tasks, setTasks] = useState<TaskView[]>([])
   const [records, setRecords] = useState<RunRecord[]>([])
   const [error, setError] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
+  const generation = useRef(0)
+  const live = useRef(false)
 
   const refresh = useCallback(async () => {
+    if (!visible || !live.current) return
+    const request = ++generation.current
     try {
       const [listResult, historyResult] = await Promise.all([
-        api<{ tasks: TaskView[] }>('list'),
-        api<{ records: RunRecord[] }>('history', { limit: 50 }),
+        api<{ tasks: TaskView[] }>('list', { sessionId }),
+        api<{ records: RunRecord[] }>('history', { limit: 50, sessionId }),
       ])
+      if (request !== generation.current) return
       setTasks(listResult.tasks)
       setRecords(historyResult.records)
-      setEnabledCount(listResult.tasks.filter((task) => task.enabled).length)
+      setEnabledCount(listResult.tasks.filter((task) => task.enabled).length, sessionId)
       setError('')
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      if (request === generation.current) setError(err instanceof Error ? err.message : String(err))
     }
-  }, [])
+  }, [sessionId, visible])
 
   useEffect(() => {
+    if (!visible) return
+    live.current = true
     void refresh()
     const timer = setInterval(() => void refresh(), 10_000)
-    return () => clearInterval(timer)
-  }, [refresh])
+    return () => { live.current = false; generation.current++; clearInterval(timer) }
+  }, [refresh, visible])
 
-  const act = async (method: string, payload: unknown) => {
+  const act = async (method: string, payload: Record<string, unknown>) => {
     try {
-      await api(method, payload)
+      await api(method, { ...payload, sessionId })
       await refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      if (live.current) setError(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -496,7 +543,7 @@ function CronPanel({ t, tab, setTab }: { t: T; tab: DrawerTab; setTab: (tab: Dra
             {tasks.map((task) => (
               <div key={task.id} className={task.enabled ? styles.row : styles.rowDisabled}>
                 {editingId === task.id ? (
-                  <EditTaskForm t={t} task={task} onDone={() => { setEditingId(null); void refresh() }} />
+                  <EditTaskForm t={t} task={task} sessionId={sessionId} onDone={() => { setEditingId(null); void refresh() }} />
                 ) : (
                   <>
                     <div className={styles.rowHead}>
@@ -566,120 +613,118 @@ function CronPanel({ t, tab, setTab }: { t: T; tab: DrawerTab; setTab: (tab: Dra
 
 interface SlotProps {
   t?: T
+  sessionId?: string
 }
 
-function CronDrawer({ t }: SlotProps) {
-  const tr = t ?? fallbackT
-  const { open, tab, toasts, prefs: currentPrefs } = useDrawerState()
-  useCronWatcher()
-
-  // Escape closes the drawer while it is open.
-  useEffect(() => {
-    if (!open) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setDrawerOpen(false)
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [open])
-
-  // Diagnostics helper: prove the toast pipeline without waiting for a task.
-  const testToast = () => {
-    console.info('[dsh-cron] test notification pushed from the drawer header')
-    notifyEvents([{
-      kind: 'completed',
-      record: {
-        id: 'toast-test', taskId: 'toast-test', prompt: '', scheduledFor: '', firedAt: '',
-        status: 'completed', excerpt: tr('toast.testBody'),
-      },
-    }])
-  }
-
+function PanelHeader({ t, sessionId, onClose }: { t: T; sessionId: string; onClose?: () => void }) {
+  const { prefs: currentPrefs } = useDrawerState()
+  const testToast = () => notifyEvents([{
+    kind: 'completed',
+    record: {
+      id: 'toast-test', taskId: 'toast-test', sessionId, prompt: '', scheduledFor: '', firedAt: '',
+      status: 'completed', excerpt: t('toast.testBody'),
+    },
+  }])
   const toggleSystem = async () => {
-    if (currentPrefs.system) {
-      setPref('system', false)
-      return
-    }
+    if (currentPrefs.system) { setPref('system', false); return }
     if (typeof Notification === 'undefined') return
     if (Notification.permission === 'default') {
-      try {
-        await Notification.requestPermission()
-      } catch { /* older engines */ }
+      try { await Notification.requestPermission() } catch { /* unavailable */ }
     }
     if (Notification.permission === 'granted') setPref('system', true)
-    else console.warn('[dsh-cron] notification permission:', Notification.permission)
   }
+  return (
+    <div className={styles.drawerHead}>
+      <span className={styles.drawerTitle}>{t('trigger.aria')}</span>
+      <details className={styles.settings}>
+        <summary className={styles.headText}>{t('prefs.title')}</summary>
+        <div className={styles.settingsBody}>
+          <button type="button" className={styles.headText} aria-pressed={currentPrefs.system} onClick={() => void toggleSystem()}>{t('prefs.systemShort')}</button>
+          <button type="button" className={styles.headText} aria-pressed={currentPrefs.sound} onClick={() => setPref('sound', !currentPrefs.sound)}>{t('prefs.soundShort')}</button>
+          <button type="button" className={styles.headText} onClick={testToast}>{t('drawer.test')}</button>
+        </div>
+      </details>
+      {onClose ? <button type="button" className={styles.drawerClose} aria-label={t('drawer.close')} onClick={onClose}>×</button> : null}
+    </div>
+  )
+}
 
+function PanelContent({ t, sessionId, visible, onClose }: { t: T; sessionId: string; visible: boolean; onClose?: () => void }) {
+  useDrawerState()
+  const view = sessionView(sessionId)
   return (
     <>
-      <div
-        className={open ? styles.maskOpen : styles.mask}
-        onClick={() => setDrawerOpen(false)}
-        aria-hidden="true"
-      />
-      <aside className={open ? styles.drawerOpen : styles.drawer} aria-hidden={!open}>
-        <div className={styles.drawerHead}>
-          <span className={styles.drawerTitle}>{tr('trigger.aria')}</span>
-          <span className={styles.headSpacer} />
-          <button
-            type="button"
-            className={currentPrefs.system ? styles.headTextOn : styles.headText}
-            aria-label={tr('prefs.system')}
-            title={tr('prefs.system')}
-            onClick={() => void toggleSystem()}
-          >
-            {tr('prefs.systemShort')}
-          </button>
-          <button
-            type="button"
-            className={currentPrefs.sound ? styles.headTextOn : styles.headText}
-            aria-label={tr('prefs.sound')}
-            title={tr('prefs.sound')}
-            onClick={() => setPref('sound', !currentPrefs.sound)}
-          >
-            {tr('prefs.soundShort')}
-          </button>
-          <button
-            type="button"
-            className={styles.headText}
-            aria-label={tr('drawer.test')}
-            title={tr('drawer.test')}
-            onClick={testToast}
-          >
-            {tr('drawer.testShort')}
-          </button>
-          <button
-            type="button"
-            className={styles.headText}
-            aria-label={tr('drawer.close')}
-            title={tr('drawer.close')}
-            onClick={() => setDrawerOpen(false)}
-          >
-            {tr('drawer.close')}
-          </button>
-        </div>
-        <CronPanel t={tr} tab={tab} setTab={setDrawerTab} />
-      </aside>
-      {// Toasts must outrank every plugin overlay: the shell.overlay layer is
-      // only z-index 20, so portal the stack to <body> with a topmost z-index
-      // instead of letting other plugins' floating UI cover it.
-      createPortal(
-        <div className={styles.toastStack} aria-live="polite">
-          {toasts.map((item) => (
-            <ToastCard key={item.key} t={tr} item={item} />
-          ))}
-        </div>,
-        document.body,
-      )}
+      <PanelHeader t={t} sessionId={sessionId} onClose={onClose} />
+      <div className={styles.owner} title={sessionId}>{t('panel.owner', { id: sessionId })}</div>
+      <CronPanel key={sessionId} t={t} tab={view.tab} setTab={tab => setDrawerTab(tab, sessionId)} sessionId={sessionId} visible={visible} />
     </>
   )
 }
 
+function StandalonePanel({ t, sessionId, children }: { t: T; sessionId: string; children: ReactNode }) {
+  const ref = useRef<HTMLDialogElement>(null)
+  useEffect(() => {
+    const dialog = ref.current!
+    const previous = document.activeElement
+    dialog.showModal() // Native top layer avoids sibling-plugin z-index contests.
+    return () => {
+      dialog.close()
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus()
+    }
+  }, [])
+  return (
+    <dialog ref={ref} className={styles.drawer} aria-label={t('trigger.aria')}
+      onCancel={event => { event.preventDefault(); setDrawerOpen(false) }}
+      onClick={event => {
+        if (event.target !== event.currentTarget) return
+        const box = event.currentTarget.getBoundingClientRect()
+        if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) setDrawerOpen(false)
+      }}>
+      <PanelContent t={t} sessionId={sessionId} visible onClose={() => setDrawerOpen(false)} />
+      {children}
+    </dialog>
+  )
+}
+
+function CronSidebarPanel({ scope, visible, t }: SidebarProps & { t: T }) {
+  const sessionId = scope.sessionId
+  useEffect(() => {
+    const view = sessionView(sessionId)
+    view.visible = visible
+    if (visible) view.unread = 0
+    storeNotify()
+    return () => { view.visible = false; storeNotify() }
+  }, [sessionId, visible])
+  return <section className={styles.sidebarPanel} aria-label={t('trigger.aria')}>
+    <PanelContent t={t} sessionId={sessionId} visible={visible} />
+  </section>
+}
+
+function CronDrawer({ t }: SlotProps) {
+  const tr = t ?? fallbackT
+  const { open, sessionId, drawerSessionId: owner, toasts } = useDrawerState()
+  useCronWatcher(sessionId)
+  const notifications = <div className={styles.toastStack} aria-live="polite">
+    {toasts.map(item => <ToastCard key={item.key} t={tr} item={item} />)}
+  </div>
+  // Modal dialogs make body siblings inert; keep notifications in the active
+  // top-layer context so test/completion toasts remain visible and clickable.
+  return createPortal(open && owner
+    ? <StandalonePanel key={owner} t={tr} sessionId={owner}>{notifications}</StandalonePanel>
+    : notifications, document.body)
+}
+
 // --- header trigger (conversation.session.header.utilities entry) -----------------
 
-function CronAction({ t }: SlotProps) {
+function CronAction({ t, sessionId }: SlotProps) {
   const tr = t ?? fallbackT
-  const { open, count, unread } = useDrawerState()
+  const state = useDrawerState()
+  const { count, unread, visible } = sessionView(sessionId ?? null)
+  const open = visible || (state.open && state.drawerSessionId === sessionId)
+  useEffect(() => {
+    setActiveSession(sessionId ?? null)
+    return () => { if (activeSessionId === sessionId) setActiveSession(null) }
+  }, [sessionId])
 
   return (
     <button
@@ -688,7 +733,12 @@ function CronAction({ t }: SlotProps) {
       aria-expanded={open}
       aria-label={tr('trigger.aria')}
       title={tr('trigger.aria')}
-      onClick={() => setDrawerOpen(!open)}
+      disabled={!sessionId}
+      onClick={() => {
+        if (!sessionId) return
+        if (state.open && state.drawerSessionId === sessionId) setDrawerOpen(false)
+        else openDrawer(sessionView(sessionId).tab, sessionId)
+      }}
     >
       <span className={styles.triggerLabel}>{tr('trigger.aria')}</span>
       {count > 0 ? <span className={styles.count}>{count}</span> : null}
@@ -707,6 +757,43 @@ export function apply(ctx: any) {
     document.head.append(tag)
     return () => tag.remove()
   }, 'dsh-cron: styles')
+  // Optional injection watches service arrival/removal without making Cron wait
+  // for Better Sidebar. Registration and bridge ownership follow this Fiber.
+  ctx.inject(['betterSidebar'], (inner: any) => {
+    const service = inner.get('betterSidebar')
+    if (!supportsSidebar(service)) return
+    inner.effect(() => {
+      const tr: T = ctx.locale.bind('cron')
+      let dispose: () => void
+      try {
+        dispose = service.registerTab({
+          id: CRON_TAB_ID,
+          title: () => tr('trigger.aria'),
+          single: true,
+          order: 80,
+          createTab: state => createSidebarTab(state, tr('trigger.aria'), window.innerWidth),
+          component: props => <CronSidebarPanel {...props} t={tr} />,
+        })
+      } catch (error) {
+        console.warn('[dsh-cron] sidebar registration failed; standalone panel remains available', error)
+        return
+      }
+      sidebar = service
+      storeNotify()
+      return () => {
+        if (sidebar === service) { sidebar = null; storeNotify() }
+        dispose()
+      }
+    }, 'dsh-cron: optional sidebar tab')
+  })
+  ctx.effect(() => () => {
+    sidebar = null
+    drawerOpen = false
+    activeSessionId = drawerSessionId = null
+    sessionViews.clear()
+    toasts = []
+    storeNotify()
+  }, 'dsh-cron: reset client state')
   // The utilities seat is the header's rightmost group (it renders right of
   // the actions group); order -50 puts the trigger just LEFT of
   // dsh-session-manager's buttons (drawer-host -40 / manage -30 / delete -10).
@@ -716,6 +803,7 @@ export function apply(ctx: any) {
       id: 'cron-trigger',
       order: -50,
       locale: 'cron',
+      inject: (sessionId: string) => ({ sessionId }),
     }, CronAction))
   ctx.slots.inject('shell.overlay', () =>
     ctx.slots.register({

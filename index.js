@@ -26,7 +26,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 
 export const name = 'cron'
 
-export const inject = ['agents', 'tools']
+export const inject = ['agents', 'tools', 'sessionPersistence', 'agentPresets', 'agentDefaultModel']
 
 // Minimum fixed-interval seconds. Deliberately small-but-nonzero: every fire
 // is a full agent turn (a real model call), so sub-10s loops burn tokens and
@@ -44,8 +44,9 @@ const TaskSchema = Schema.object({
   at: Schema.string().description('ISO 8601 instant for a one-shot task, e.g. 2026-08-23T09:00:00+08:00.'),
   every: Schema.number().description(`Fixed interval in seconds (min ${MIN_EVERY_SECONDS}).`),
   daily: Schema.string().description('Local wall-clock time "HH:MM", fires once per day.'),
-  cron: Schema.string().description('Standard 5-field cron expression (minute hour day month weekday), local time.'),
-  sessionId: Schema.string().description('Bind the task to one session id: runs are delivered there instead of the most recently active session.'),
+  cron: Schema.string().description('Standard 5-field cron expression (minute hour day month weekday).'),
+  timeZone: Schema.string().description('IANA time zone for daily and cron schedules, e.g. Asia/Shanghai.'),
+  sessionId: Schema.string().description('Bind the task to one session id: runs are delivered only there.'),
   enabled: Schema.boolean().default(true),
 })
 
@@ -53,6 +54,8 @@ export const Config = Schema.object({
   storagePath: Schema.string().default(''),
   historyPath: Schema.string().default(''),
   tickSeconds: Schema.number().default(15),
+  defaultTimeZone: Schema.string().default('UTC'),
+  coldWake: Schema.boolean().default(true),
   // Native OS notifications on run completion — these fire from the host
   // process, so they appear even with NO browser open.
   systemNotify: Schema.boolean().default(true),
@@ -137,23 +140,48 @@ function parseCron(expr) {
   }
 }
 
-function cronMatches(cron, date) {
-  if (!cron.minute.has(date.getMinutes())) return false
-  if (!cron.hour.has(date.getHours())) return false
-  if (!cron.month.has(date.getMonth() + 1)) return false
-  const domMatch = cron.dom.has(date.getDate())
-  const dowMatch = cron.dow.has(date.getDay())
+const WEEKDAY = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+const zoneFormatters = new Map()
+
+function canonicalTimeZone(value) {
+  try {
+    return new Intl.DateTimeFormat('en-US', { timeZone: value }).resolvedOptions().timeZone
+  } catch {
+    return null
+  }
+}
+
+function zonedParts(epoch, timeZone) {
+  let formatter = zoneFormatters.get(timeZone)
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-US-u-ca-iso8601-nu-latn', {
+      timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', weekday: 'short', hourCycle: 'h23',
+    })
+    zoneFormatters.set(timeZone, formatter)
+  }
+  const parts = Object.fromEntries(formatter.formatToParts(new Date(epoch)).map((part) => [part.type, part.value]))
+  return { minute: Number(parts.minute), hour: Number(parts.hour), month: Number(parts.month), day: Number(parts.day), weekday: WEEKDAY[parts.weekday] }
+}
+
+function cronMatches(cron, epoch, timeZone) {
+  const date = zonedParts(epoch, timeZone)
+  if (!cron.minute.has(date.minute)) return false
+  if (!cron.hour.has(date.hour)) return false
+  if (!cron.month.has(date.month)) return false
+  const domMatch = cron.dom.has(date.day)
+  const dowMatch = cron.dow.has(date.weekday)
   // Standard cron: when BOTH dom and dow are restricted, either may match.
   if (!cron.domStar && !cron.dowStar) return domMatch || dowMatch
   return domMatch && dowMatch
 }
 
 /** First matching local minute strictly after `afterMs`, or null within 4 years. */
-function nextCronSlot(cron, afterMs) {
+function nextCronSlot(cron, afterMs, timeZone) {
   let t = Math.floor(afterMs / 60_000) * 60_000 + 60_000
   const limit = t + 4 * 366 * 24 * 60 * 60_000
   while (t < limit) {
-    if (cronMatches(cron, new Date(t))) return t
+    if (cronMatches(cron, t, timeZone)) return t
     t += 60_000
   }
   return null
@@ -171,6 +199,7 @@ function validateTask(task) {
   }
   if (task.daily && !DAILY_RE.test(task.daily)) return `task "${task.id}" daily must be "HH:MM" (24h)`
   if (task.cron && !parseCron(task.cron)) return `task "${task.id}" has an invalid cron expression (want 5 fields: minute hour day month weekday)`
+  if ((task.daily || task.cron) && task.timeZone && !canonicalTimeZone(task.timeZone)) return `task "${task.id}" has an invalid IANA timeZone`
   return null
 }
 
@@ -184,12 +213,35 @@ function generateTaskId(tasks) {
 }
 
 /** Today's local occurrence of a "HH:MM" rule at or before `now`, as epoch ms. */
-function dailySlotToday(daily, now) {
+function dailySlotToday(daily, now, timeZone) {
   const m = DAILY_RE.exec(daily)
   if (!m) return null
-  const d = new Date(now)
-  d.setHours(Number(m[1]), Number(m[2]), 0, 0)
-  return d.getTime()
+  const targetHour = Number(m[1])
+  const targetMinute = Number(m[2])
+  const today = zonedParts(now, timeZone)
+  const start = Math.floor(now / 60_000) * 60_000
+  for (let offset = 0; offset <= 30 * 60; offset += 1) {
+    const epoch = start - offset * 60_000
+    const parts = zonedParts(epoch, timeZone)
+    if (parts.month !== today.month || parts.day !== today.day) break
+    if (parts.hour === targetHour && parts.minute === targetMinute) return epoch
+  }
+  return null
+}
+
+function nextDailySlot(daily, now, timeZone) {
+  const m = DAILY_RE.exec(daily)
+  if (!m) return null
+  const targetHour = Number(m[1])
+  const targetMinute = Number(m[2])
+  let epoch = Math.floor(now / 60_000) * 60_000 + 60_000
+  const limit = epoch + 3 * 24 * 60 * 60_000
+  while (epoch < limit) {
+    const parts = zonedParts(epoch, timeZone)
+    if (parts.hour === targetHour && parts.minute === targetMinute) return epoch
+    epoch += 60_000
+  }
+  return null
 }
 
 /** Effective enabled state: a runtime override wins over the declared flag. */
@@ -203,7 +255,7 @@ function isEnabled(task) {
  */
 function cronNext(task, startedAt) {
   if (task.cronNext == null) {
-    task.cronNext = nextCronSlot(task.cronParsed, task.lastRunAt ?? startedAt - 60_000)
+    task.cronNext = nextCronSlot(task.cronParsed, task.lastRunAt ?? startedAt - 60_000, task.timeZone)
   }
   return task.cronNext
 }
@@ -224,7 +276,7 @@ function dueSlot(task, now, startedAt) {
     return now >= slot ? slot : null
   }
   if (task.daily) {
-    const slot = dailySlotToday(task.daily, now)
+    const slot = dailySlotToday(task.daily, now, task.timeZone)
     if (slot == null || slot > now) return null
     // Already consumed today's slot (covers catch-up runs too).
     if ((task.lastRunAt ?? 0) >= slot) return null
@@ -243,11 +295,11 @@ function nextRunAt(task, now, startedAt) {
   if (task.at) return task.firedAt ? null : Date.parse(task.at)
   if (task.every != null) return (task.lastRunAt ?? startedAt) + task.every * 1000
   if (task.daily) {
-    const slot = dailySlotToday(task.daily, now)
+    const slot = dailySlotToday(task.daily, now, task.timeZone)
     if (slot == null) return null
     // Today's slot still ahead, or missed and not yet caught up -> today.
     if (slot > now || (task.lastRunAt ?? 0) < slot) return slot
-    return slot + 86_400_000
+    return nextDailySlot(task.daily, now, task.timeZone)
   }
   if (task.cron) return cronNext(task, startedAt)
   return null
@@ -259,7 +311,7 @@ function taskView(task, now, startedAt) {
   return {
     id: task.id,
     prompt: task.prompt,
-    schedule: task.at ? { at: task.at } : task.every != null ? { everySeconds: task.every } : task.daily ? { daily: task.daily } : { cron: task.cron },
+    schedule: task.at ? { at: task.at } : task.every != null ? { everySeconds: task.every } : task.daily ? { daily: task.daily, timeZone: task.timeZone } : { cron: task.cron, timeZone: task.timeZone },
     enabled: isEnabled(task),
     origin: task.origin,
     sessionId: task.sessionId ?? null,
@@ -404,6 +456,7 @@ function sendSystemNotification(title, body, { sound = true } = {}) {
 export function apply(ctx, config) {
   const logger = ctx.logger
   const startedAt = Date.now()
+  const defaultTimeZone = canonicalTimeZone(config.defaultTimeZone) ?? 'UTC'
   const dshHome = process.env.DSH_HOME || join(homedir(), '.dsh')
   const storagePath = config.storagePath || join(dshHome, 'cron-tasks.json')
   const historyPath = config.historyPath || join(dshHome, 'cron-history.jsonl')
@@ -418,7 +471,7 @@ export function apply(ctx, config) {
     // reach the file and are rebuilt on load.
     const dynamic = [...tasks.values()]
       .filter((t) => t.origin === 'dynamic')
-      .map((t) => ({ id: t.id, prompt: t.prompt, at: t.at, every: t.every, daily: t.daily, cron: t.cron, sessionId: t.sessionId, enabled: t.enabled }))
+      .map((t) => ({ id: t.id, prompt: t.prompt, at: t.at, every: t.every, daily: t.daily, cron: t.cron, timeZone: t.timeZone, sessionId: t.sessionId, enabled: t.enabled }))
     const runs = {}
     const overrides = {}
     for (const t of tasks.values()) {
@@ -462,6 +515,7 @@ export function apply(ctx, config) {
       every: raw.every,
       daily: raw.daily,
       cron: raw.cron,
+      timeZone: raw.daily || raw.cron ? (canonicalTimeZone(raw.timeZone || defaultTimeZone) ?? defaultTimeZone) : null,
       cronParsed: raw.cron ? parseCron(raw.cron) : null,
       cronNext: null,
       // The session the task was created in: fires deliver back there.
@@ -482,8 +536,11 @@ export function apply(ctx, config) {
     if (invalid) logger.warn(`cron: skipping stored task: ${invalid}`)
   }
   for (const raw of config.tasks ?? []) {
-    const invalid = addTask(raw, 'config')
-    if (invalid) logger.warn(`cron: skipping config task: ${invalid}`)
+    if (typeof raw?.sessionId !== 'string' || raw.sessionId.trim() === '') {
+      throw new Error(`cron: static task ${JSON.stringify(raw?.id ?? '<unknown>')} requires an explicit sessionId owner`)
+    }
+    const invalid = addTask({ ...raw, sessionId: raw.sessionId.trim() }, 'config')
+    if (invalid) throw new Error(`cron: invalid static task: ${invalid}`)
   }
   for (const [id, run] of Object.entries(stored.runs)) {
     const task = tasks.get(id)
@@ -521,6 +578,16 @@ export function apply(ctx, config) {
         } catch { /* skip a torn line */ }
       }
       if (history.length > MAX_HISTORY) history = history.slice(-MAX_HISTORY)
+      let reconciled = false
+      const interruptedAt = Date.now()
+      for (const record of history) {
+        if (record.status !== 'delivered' && record.status !== 'running') continue
+        record.status = 'interrupted'
+        record.endReason = 'host-restart'
+        record.completedAt = interruptedAt
+        reconciled = true
+      }
+      if (reconciled) persistHistory()
     } catch (error) {
       logger.warn(`cron: ignoring unreadable history ${historyPath}: ${error?.message ?? error}`)
       history = []
@@ -552,6 +619,10 @@ export function apply(ctx, config) {
     Object.assign(record, patch)
     persistHistory()
   }
+
+  // A prior process cannot finish a nonterminal run. Reconcile before timers,
+  // tools, or HTTP queries expose history from this process.
+  loadHistory()
 
   /**
    * Runs awaiting their execution outcome, keyed by injected message id.
@@ -625,89 +696,177 @@ export function apply(ctx, config) {
 
   // --- delivery --------------------------------------------------------------
 
-  // The web UI may host several root agents (one per open session); deliver
-  // to the one that most recently showed life.
-  let lastActiveRoot = null
-  ctx.on('agent/created', guarded('agent/created listener', ({ agent }) => {
-    if (ctx.agents.roots().includes(agent)) lastActiveRoot = agent
-  }))
-  ctx.on('agent/status', guarded('agent/status listener', ({ agent }) => {
-    if (agent && ctx.agents.roots().includes(agent)) lastActiveRoot = agent
-  }))
-
-  /**
-   * Pick the delivery target for one task. A task created inside a session
-   * (tool call or panel) is bound to that session and fires back into it, so
-   * scheduled replies stay in the window the user created them from — not in
-   * whatever window happens to be open. Only when the bound session is gone
-   * (closed) do we fall back to the most recently active root.
-   */
-  function pickAgent(task) {
-    const roots = ctx.agents.roots()
-    if (task?.sessionId) {
-      const bound = roots.find((agent) => agent.session?.id === task.sessionId)
-      if (bound) return bound
-      logger.warn(`cron: task "${task.id}" is bound to session "${task.sessionId}" which no longer exists; falling back to the active session`)
+  /** Last provider/model pair recorded by the target Session. */
+  function lastRequestConfig(events) {
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index]
+      if (event?.type !== 'request/header') continue
+      const provider = event.data?.header?.config?.provider
+      const model = event.data?.header?.config?.model
+      if (provider && model) return { provider, model }
     }
-    if (lastActiveRoot && roots.includes(lastActiveRoot)) return lastActiveRoot
-    return roots.length > 0 ? roots[roots.length - 1] : null
+    return null
   }
 
-  /**
-   * Deliver one task. Returns the history record when the message was
-   * accepted, null when no agent could take it (retry next tick).
-   */
-  function fire(task, slot) {
-    const agent = pickAgent(task)
-    if (!agent) {
-      logger.warn(`cron: task "${task.id}" is due but no root agent exists yet; will retry next tick`)
+  /** Current preset projection used by modern Core session reconstruction. */
+  function currentSessionPreset(meta, events) {
+    let preset = typeof meta?.agentPreset === 'string' && meta.agentPreset !== ''
+      ? meta.agentPreset
+      : undefined
+    for (const event of events) {
+      const selected = event?.type === 'agent-preset/selected'
+        ? event.data?.agentPreset
+        : undefined
+      if (typeof selected === 'string' && selected !== '') preset = selected
+    }
+    return preset
+  }
+
+  /** Read one cold Session across the Core 0.1.1/0.1.2 inspect and 0.1.3 handle seams. */
+  async function inspectPersistedSession(sessionId) {
+    const persistence = ctx.sessionPersistence
+    const listed = await persistence.list()
+    const snapshot = listed.find((candidate) => String(candidate?.header?.id ?? candidate?.id) === sessionId)
+    const header = snapshot?.header ?? snapshot
+    if (!header?.cwd) return null
+    if (header.origin === 'subagent' || Number(header.delegationDepth ?? 0) > 0) {
+      logger.warn(`cron: bound session "${sessionId}" is subagent-owned; refusing cold resume`)
       return null
     }
-    let message
+    if (typeof persistence.open === 'function') {
+      const handle = await persistence.open(header.id, 'read')
+      try {
+        return { meta: handle.header, events: await handle.read() }
+      } finally {
+        await handle.close()
+      }
+    }
+    if (typeof persistence.inspect === 'function') return persistence.inspect(header.id)
+    throw new Error('session persistence exposes neither open nor inspect')
+  }
+
+  /** One in-flight resume per Session prevents duplicate cold agents. */
+  const resumes = new Map()
+
+  async function resumeBoundSession(sessionId) {
+    if (!config.coldWake) return null
+    const pending = resumes.get(sessionId)
+    if (pending) return pending
+    const operation = (async () => {
+      let inspected
+      try {
+        inspected = await inspectPersistedSession(sessionId)
+        if (inspected === null) return null
+      } catch (error) {
+        logger.warn(`cron: cannot inspect bound session "${sessionId}": ${error?.message ?? error}`)
+        return null
+      }
+      const events = [...inspected.events]
+      const presetId = currentSessionPreset(inspected.meta, events)
+      const recorded = lastRequestConfig(events)
+      const fallback = ctx.agentDefaultModel.currentSelection()
+      const selection = recorded ?? { provider: fallback.provider, model: fallback.model }
+      try {
+        const handle = await ctx.agents.resume({
+          resumeSessionId: inspected.meta.id,
+          agentOptions: selection,
+          setup: async (agentCtx) => {
+            await ctx.agentPresets.mount(agentCtx, presetId)
+          },
+        })
+        if (String(handle.agent.session?.id) !== sessionId) {
+          logger.warn(`cron: resumed session identity mismatch for "${sessionId}"`)
+          await handle.dispose?.()
+          return null
+        }
+        return handle.agent
+      } catch (error) {
+        logger.warn(`cron: cannot resume bound session "${sessionId}": ${error?.message ?? error}`)
+        return null
+      }
+    })().finally(() => resumes.delete(sessionId))
+    resumes.set(sessionId, operation)
+    return operation
+  }
+
+  /** Resolve only the task's exact bound Session. Never fall back. */
+  async function resolveBoundAgent(task) {
+    if (!task?.sessionId) {
+      logger.warn(`cron: task "${task?.id}" has no bound session; refusing unattended delivery`)
+      return null
+    }
+    const live = ctx.agents.roots().find((agent) => String(agent.session?.id) === task.sessionId)
+    if (live) return live
+    return resumeBoundSession(task.sessionId)
+  }
+
+  /** Per-task ownership covers cold resume through durable stamping. */
+  const firing = new Set()
+
+  /** Deliver one task asynchronously; failure leaves its slot overdue. */
+  async function fire(task, slot) {
+    if (firing.has(task.id)) return null
+    firing.add(task.id)
     try {
-      message = createUserMessage({
+      const agent = await resolveBoundAgent(task)
+      if (!agent) {
+        logger.warn(`cron: task "${task.id}" is due but bound session "${task.sessionId ?? ''}" is unavailable; will retry next tick`)
+        return null
+      }
+      const message = createUserMessage({
         content: [{ type: 'text', text: renderTaskMessage(task, slot) }],
         source: { kind: 'plugin', plugin: 'cron' },
       })
-      // Queues an ordinary turn and wakes the driver; when the agent is
-      // busy the turn waits behind the current one, so tasks never overlap.
-      agent.followup(message)
-    } catch (error) {
-      logger.warn(`cron: followup failed for task "${task.id}": ${error?.message ?? error}`)
-      return null
+      try {
+        agent.followup(message)
+      } catch (error) {
+        logger.warn(`cron: followup failed for task "${task.id}": ${error?.message ?? error}`)
+        return null
+      }
+      const now = Date.now()
+      task.lastRunAt = now
+      if (task.at) task.firedAt = now
+      task.cronNext = null
+      save()
+      const record = appendHistory({
+        id: `run-${historySeq}-${now.toString(36)}`,
+        seq: historySeq++,
+        taskId: task.id,
+        prompt: task.prompt,
+        sessionId: agent.session?.id ?? null,
+        scheduledFor: new Date(slot).toISOString(),
+        firedAt: new Date(now).toISOString(),
+        status: 'delivered',
+      })
+      pendingRuns.set(message.id, { recordId: record.id, session: agent.session, seen: false })
+      logger.info(`cron: fired task "${task.id}" (scheduled ${new Date(slot).toISOString()})`)
+      return record
+    } finally {
+      firing.delete(task.id)
     }
-    const now = Date.now()
-    task.lastRunAt = now
-    if (task.at) task.firedAt = now
-    task.cronNext = null // recompute the cron slot from this run
-    save()
-    const record = appendHistory({
-      id: `run-${historySeq}-${now.toString(36)}`,
-      seq: historySeq++,
-      taskId: task.id,
-      prompt: task.prompt,
-      sessionId: agent.session?.id ?? null,
-      scheduledFor: new Date(slot).toISOString(),
-      firedAt: new Date(now).toISOString(),
-      status: 'delivered',
-    })
-    pendingRuns.set(message.id, { recordId: record.id, session: agent.session, seen: false })
-    logger.info(`cron: fired task "${task.id}" (scheduled ${new Date(slot).toISOString()})`)
-    return record
   }
 
+  /** Serialize scheduler passes; timer callbacks merely request another pass. */
+  let tickPromise = null
+  let tickRequested = false
   function tick() {
-    const now = Date.now()
-    for (const task of tasks.values()) {
-      // Per-task isolation: one malformed task must not block the others,
-      // and nothing here may ever escape the timer callback.
-      try {
-        const slot = dueSlot(task, now, startedAt)
-        if (slot != null) fire(task, slot)
-      } catch (error) {
-        logger.warn(`cron: tick failed for task "${task?.id}": ${error?.message ?? error}`)
+    tickRequested = true
+    if (tickPromise) return tickPromise
+    tickPromise = (async () => {
+      while (tickRequested) {
+        tickRequested = false
+        const now = Date.now()
+        for (const task of tasks.values()) {
+          try {
+            const slot = dueSlot(task, now, startedAt)
+            if (slot != null) await fire(task, slot)
+          } catch (error) {
+            logger.warn(`cron: tick failed for task "${task?.id}": ${error?.message ?? error}`)
+          }
+        }
       }
-    }
+    })().finally(() => { tickPromise = null })
+    return tickPromise
   }
 
   // One interval owns the whole schedule; cleared automatically on unload.
@@ -725,19 +884,41 @@ export function apply(ctx, config) {
 
   // --- shared operations (tools + HTTP API) -----------------------------------
 
-  function listTasks() {
+  function requireSessionId(value, source) {
+    if (typeof value !== 'string' || value.trim() === '') throw new Error(`${source} requires a session owner`)
+    return value.trim()
+  }
+
+  function toolRootSessionId(exec) {
+    const agent = exec?.agent
+    if (!agent || !ctx.agents.roots().includes(agent)) throw new Error('cron tools require a live root Session owner')
+    return requireSessionId(agent.session?.id, 'cron tool call')
+  }
+
+  function assertTaskOwner(task, sessionId) {
+    const owner = requireSessionId(sessionId, 'cron operation')
+    if (task.sessionId !== owner) throw new Error(`task "${task.id}" is not owned by Session "${owner}"`)
+    return owner
+  }
+
+  function listTasks(sessionId) {
+    const owner = requireSessionId(sessionId, 'cron list')
     const now = Date.now()
-    return [...tasks.values()].map((t) => taskView(t, now, startedAt))
+    return [...tasks.values()]
+      .filter((task) => task.sessionId === owner)
+      .map((task) => taskView(task, now, startedAt))
   }
 
   function addDynamicTask(raw, sessionId) {
+    const owner = requireSessionId(sessionId, 'cron add')
     const input = { ...raw }
     // The id is optional for callers: the web form never asks for one and
     // the model may omit it — allocate a unique id instead.
     if (input.id == null || input.id === '') input.id = generateTaskId(tasks)
-    // Bind to the caller's session so the task fires back into the window
-    // it was created from. An explicit payload sessionId wins (panel add).
-    if (sessionId && (input.sessionId == null || input.sessionId === '')) input.sessionId = sessionId
+    if (input.sessionId != null && String(input.sessionId).trim() !== owner) {
+      throw new Error(`cron add cannot assign another Session owner`)
+    }
+    input.sessionId = owner
     const invalid = validateTask(input)
     if (invalid) throw new Error(invalid)
     const added = addTask(input, 'dynamic')
@@ -747,9 +928,10 @@ export function apply(ctx, config) {
     return taskView(task, Date.now(), startedAt)
   }
 
-  function removeDynamicTask(id) {
+  function removeDynamicTask(id, sessionId) {
     const task = tasks.get(id)
     if (!task) throw new Error(`no task with id "${id}"`)
+    assertTaskOwner(task, sessionId)
     if (task.origin !== 'dynamic') throw new Error(`task "${id}" comes from cordis.yml config; remove it there`)
     tasks.delete(id)
     save()
@@ -759,15 +941,31 @@ export function apply(ctx, config) {
   const RULE_KEYS = ['at', 'every', 'daily', 'cron']
 
   /**
+   * Some strict tool-call transports materialize omitted optional fields as
+   * empty strings and the omitted numeric `every` field as zero. Strip those
+   * transport placeholders at the model-tool boundary; the HTTP API keeps its
+   * original strict validation semantics.
+   */
+  function normalizeToolScheduleArgs(args) {
+    const normalized = { ...args }
+    for (const key of ['at', 'daily', 'cron', 'timeZone']) {
+      if (typeof normalized[key] === 'string' && normalized[key].trim() === '') delete normalized[key]
+    }
+    if (normalized.every === 0) delete normalized.every
+    return normalized
+  }
+
+  /**
    * Edit a dynamic task. Prompt updates in place; when any schedule rule key
    * is present in the patch the whole schedule is replaced (the other rules
    * are cleared) and the run stamps reset so the new rule takes effect now.
    */
-  function updateDynamicTask(id, patch) {
+  function updateDynamicTask(id, patch, sessionId) {
     const task = tasks.get(id)
     if (!task) throw new Error(`no task with id "${id}"`)
+    assertTaskOwner(task, sessionId)
     if (task.origin !== 'dynamic') throw new Error(`task "${id}" comes from cordis.yml config; edit it there`)
-    const merged = { id, prompt: task.prompt }
+    const merged = { id, prompt: task.prompt, sessionId: task.sessionId, timeZone: task.timeZone }
     for (const k of RULE_KEYS) if (task[k] != null) merged[k] = task[k]
     if (typeof patch.prompt === 'string' && patch.prompt.trim() !== '') merged.prompt = patch.prompt.trim()
     const scheduleTouched = RULE_KEYS.some((k) => patch[k] !== undefined && patch[k] !== null)
@@ -779,6 +977,11 @@ export function apply(ctx, config) {
     if (invalid) throw new Error(invalid)
     task.prompt = merged.prompt
     for (const k of RULE_KEYS) task[k] = merged[k]
+    if (patch.timeZone !== undefined) {
+      const timeZone = canonicalTimeZone(patch.timeZone)
+      if (!timeZone) throw new Error(`task "${id}" has an invalid IANA timeZone`)
+      task.timeZone = timeZone
+    }
     if (scheduleTouched) {
       task.lastRunAt = null
       task.firedAt = null
@@ -789,9 +992,10 @@ export function apply(ctx, config) {
     return taskView(task, Date.now(), startedAt)
   }
 
-  function setTaskEnabled(id, enabled) {
+  function setTaskEnabled(id, enabled, sessionId) {
     const task = tasks.get(id)
     if (!task) throw new Error(`no task with id "${id}"`)
+    assertTaskOwner(task, sessionId)
     if (typeof enabled !== 'boolean') throw new Error('enabled must be a boolean')
     // null clears the override when it matches the declared flag again.
     task.enabledOverride = enabled === (task.enabled !== false) ? null : enabled
@@ -799,18 +1003,21 @@ export function apply(ctx, config) {
     return taskView(task, Date.now(), startedAt)
   }
 
-  function runTaskNow(id) {
+  async function runTaskNow(id, sessionId) {
     const task = tasks.get(id)
     if (!task) throw new Error(`no task with id "${id}"`)
-    const record = fire(task, Date.now())
-    if (!record) throw new Error('no root agent is available to receive the task')
+    assertTaskOwner(task, sessionId)
+    const record = await fire(task, Date.now())
+    if (!record) throw new Error(`bound session "${task.sessionId ?? ''}" is unavailable`)
     return { fired: id, run: record }
   }
 
-  function listHistory(limit) {
+  function listHistory(limit, sessionId) {
+    const owner = requireSessionId(sessionId, 'cron history')
     loadHistory()
     const cap = Number.isFinite(limit) && limit > 0 ? Math.min(limit, MAX_HISTORY) : 100
-    return history.slice(-cap).reverse()
+    const matching = history.filter((record) => record.sessionId === owner)
+    return matching.slice(-cap).reverse()
   }
 
   // --- management tools --------------------------------------------------------
@@ -823,8 +1030,8 @@ export function apply(ctx, config) {
       schema: { type: 'string' },
       render: (_args, value) => [{ type: 'text', text: value }],
     },
-    async execute() {
-      return JSON.stringify(listTasks(), null, 2)
+    async execute(_args, exec) {
+      return JSON.stringify(listTasks(toolRootSessionId(exec)), null, 2)
     },
   }))
 
@@ -836,8 +1043,9 @@ export function apply(ctx, config) {
       prompt: { type: 'string', required: true, description: 'What the agent should do when the task fires.' },
       at: { type: 'string', description: 'ISO 8601 instant for a one-shot task.' },
       every: { type: 'number', description: `Fixed interval in seconds (min ${MIN_EVERY_SECONDS}).` },
-      daily: { type: 'string', description: 'Local wall-clock "HH:MM" for a daily task.' },
-      cron: { type: 'string', description: 'Standard 5-field cron expression (minute hour day month weekday), local time.' },
+      daily: { type: 'string', description: 'Wall-clock "HH:MM" for a daily task in timeZone.' },
+      cron: { type: 'string', description: 'Standard 5-field cron expression (minute hour day month weekday) in timeZone.' },
+      timeZone: { type: 'string', description: 'IANA zone for daily/cron, e.g. Asia/Shanghai; defaults to plugin defaultTimeZone.' },
     },
     output: {
       schema: { type: 'string' },
@@ -845,7 +1053,7 @@ export function apply(ctx, config) {
     },
     async execute(args, exec) {
       // Bind to the calling session: the task's runs reply in this window.
-      const view = addDynamicTask(args, exec?.agent?.session?.id)
+      const view = addDynamicTask(normalizeToolScheduleArgs(args), toolRootSessionId(exec))
       return `Task "${view.id}" added. Next run: ${view.nextRunAt}`
     },
   }))
@@ -858,15 +1066,17 @@ export function apply(ctx, config) {
       prompt: { type: 'string', description: 'New task prompt.' },
       at: { type: 'string', description: 'Replace the schedule with a one-shot ISO 8601 instant.' },
       every: { type: 'number', description: `Replace the schedule with a fixed interval in seconds (min ${MIN_EVERY_SECONDS}).` },
-      daily: { type: 'string', description: 'Replace the schedule with a daily local "HH:MM".' },
-      cron: { type: 'string', description: 'Replace the schedule with a standard 5-field cron expression.' },
+      daily: { type: 'string', description: 'Replace the schedule with a daily "HH:MM" in timeZone.' },
+      cron: { type: 'string', description: 'Replace the schedule with a standard 5-field cron expression in timeZone.' },
+      timeZone: { type: 'string', description: 'Replace the IANA zone for daily/cron.' },
     },
     output: {
       schema: { type: 'string' },
       render: (_args, value) => [{ type: 'text', text: value }],
     },
-    async execute(args) {
-      const view = updateDynamicTask(args.id, args)
+    async execute(args, exec) {
+      const patch = normalizeToolScheduleArgs(args)
+      const view = updateDynamicTask(patch.id, patch, toolRootSessionId(exec))
       return `Task "${view.id}" updated. Next run: ${view.nextRunAt}`
     },
   }))
@@ -881,8 +1091,8 @@ export function apply(ctx, config) {
       schema: { type: 'string' },
       render: (_args, value) => [{ type: 'text', text: value }],
     },
-    async execute(args) {
-      removeDynamicTask(args.id)
+    async execute(args, exec) {
+      removeDynamicTask(args.id, toolRootSessionId(exec))
       return `Task "${args.id}" removed.`
     },
   }))
@@ -897,8 +1107,8 @@ export function apply(ctx, config) {
       schema: { type: 'string' },
       render: (_args, value) => [{ type: 'text', text: value }],
     },
-    async execute(args) {
-      return JSON.stringify(listHistory(args.limit ?? 20), null, 2)
+    async execute(args, exec) {
+      return JSON.stringify(listHistory(args.limit ?? 20, toolRootSessionId(exec)), null, 2)
     },
   }))
 
@@ -910,14 +1120,20 @@ export function apply(ctx, config) {
   ctx.inject(['webServer', 'webRuntime'], (webCtx) => {
     const fence = (req) => isTrustedApiRequest(req, webCtx.webRuntime.trustedHosts)
 
+    const httpOwner = (payload) => {
+      const sessionId = requireSessionId(payload?.sessionId, 'cron HTTP request')
+      const owner = ctx.agents.roots().find((agent) => String(agent.session?.id) === sessionId)
+      if (!owner) throw new Error('cron HTTP request requires a live root Session owner')
+      return sessionId
+    }
     const api = {
-      list: () => ({ tasks: listTasks() }),
-      add: (payload) => ({ task: addDynamicTask(payload) }),
-      update: (payload) => ({ task: updateDynamicTask(payload?.id, payload ?? {}) }),
-      remove: (payload) => removeDynamicTask(payload?.id),
-      toggle: (payload) => ({ task: setTaskEnabled(payload?.id, payload?.enabled) }),
-      run: (payload) => runTaskNow(payload?.id),
-      history: (payload) => ({ records: listHistory(payload?.limit) }),
+      list: (payload) => ({ tasks: listTasks(httpOwner(payload)) }),
+      add: (payload) => ({ task: addDynamicTask(payload, httpOwner(payload)) }),
+      update: (payload) => ({ task: updateDynamicTask(payload?.id, payload ?? {}, httpOwner(payload)) }),
+      remove: (payload) => removeDynamicTask(payload?.id, httpOwner(payload)),
+      toggle: (payload) => ({ task: setTaskEnabled(payload?.id, payload?.enabled, httpOwner(payload)) }),
+      run: (payload) => runTaskNow(payload?.id, httpOwner(payload)),
+      history: (payload) => ({ records: listHistory(payload?.limit, httpOwner(payload)) }),
     }
 
     webCtx.effect(() => webCtx.webServer.register({
@@ -945,7 +1161,7 @@ export function apply(ctx, config) {
             writeJson(res, 404, { ok: false, error: { code: 'not-found', message: `unknown cron API method "${method}"` } })
             return
           }
-          writeJson(res, 200, { ok: true, result: handler(payload) })
+          writeJson(res, 200, { ok: true, result: await handler(payload) })
         } catch (error) {
           // Last line of defense: a rejected handler promise must never
           // escape into the webserver as an unhandledRejection.
