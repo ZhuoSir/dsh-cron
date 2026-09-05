@@ -45,6 +45,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node tests/host.test.mjs && node tests/client.test.mjs && node tests/toast-render.test.mjs && node tests/core-compat.test.mjs",
     "test:core": "node tests/core-compat.test.mjs",
+    "test:sidebar": "node tests/sidebar-compat.test.mjs",
     "verify:package": "node tests/package.test.mjs",
     "verify": "pnpm typecheck && pnpm build && pnpm test && pnpm verify:package"
   },
@@ -91,6 +92,7 @@
     "@deepseek-ai/dsh-timeout": "0.1.1-rc.2",
     "@deepseek-ai/dsh-tools": "0.1.1-rc.2",
     "@deepseek-ai/dsh-web": "0.1.1-rc.2",
+    "@playwright/test": "^1.62.1",
     "@types/react": "~18.3.1",
     "@types/react-dom": "18.3.7",
     "jsdom": "30.0.1",

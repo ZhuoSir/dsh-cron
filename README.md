@@ -120,7 +120,17 @@ HTTP API 通过可选注入挂载（`ctx.inject(['webServer','webRuntime'])`）�
 | 主题 | 使用当前公开的 DSH background / label / border / state tokens；亮色和暗色均经过浏览器验证，token 缺失时回退到 `color-scheme` 感知的系统色 |
 | pnpm | 开发与发布固定 `pnpm@11.7.0`；安装使用不运行构建脚本 |
 
-与其他插件共存：无已知冲突；会话头部使用 `order: -50` 与 dsh-session-manager 的按钮（-40/-30/-10）相邻。
+与其他插件共存：会话头部使用 `order: -50` 与 dsh-session-manager 的按钮（-40/-30/-10）相邻。
+
+### Better Sidebar 收回按钮兼容修复（开发分支，尚未发布）
+
+`dsh-tauri 0.6.7` 为隐藏左侧栏重复按钮，使用了全局 `Collapse sidebar` / `收起侧边栏` 标签选择器；它也会隐藏 `Better Sidebar 0.18.0` 展开后的同名右侧收回按钮（英文界面可复现）。本项目在 Client 样式中附带一个局部兼容覆盖，仅恢复 `[data-dsh-panel-host] [data-dsh-toggle-cluster]` 内匹配的原生按钮。
+
+- 原生展开/收回动作、标签页、编辑器及 Session 状态不变；左侧栏和底部面板不受影响。
+- 无需额外安装 Better Sidebar 依赖；未安装时选择器不匹配，不产生额外 UI。
+- 与 Cron 样式共同加载和卸载，不修改 DSH / Better Sidebar 的安装源码或用户配置。
+- 此修复尚不在上面的 `v0.4.2` tag 中；测试开发版本请先 `pnpm install && pnpm build`，再按本地目录方式安装，按安装章节说明在安全时机重启并刷新。仅修改本仓库不会自动更新正在运行的 Desktop。
+- 待 dsh-tauri 将隐藏规则限定到左侧导航后可移除此覆盖。此项不是 Cron 标签页集成（另见 issue #15）。
 
 ## 工作原理
 
@@ -138,6 +148,8 @@ pnpm typecheck
 pnpm test         # host ownership/restart + client bundle/DOM + Core 兼容
 DSH_CORE_PATH=/path/to/dsh-0.1.3-alpha.1 pnpm test:core  # 校验官方 alpha.1 精确 commit 与 handle API
 pnpm verify       # typecheck + build + tests + freshness/pack smoke
+pnpm exec playwright install chromium   # 首次浏览器回归测试
+pnpm test:sidebar # CSS 优先级、展开/收回、键盘、窄屏、卸载回归；CI 单独运行
 ```
 
 开发依赖保留在可用的受控 `0.1.1-rc.2` 编译闭包。发布前设置 `DSH_CORE_PATH` 指向官方 `0.1.2-rc.1` 或 `0.1.3-alpha.1` source checkout；`test:core` 校验对应精确 commit，并验证旧 `inspect()` seam 或 alpha.1 的 snapshot + read handle seam。Host 所有权、HTTP 所有权、重启恢复、Client 注册/交互及打包新鲜度分别由 `host.test.mjs`、`client.test.mjs`、`toast-render.test.mjs`、`core-compat.test.mjs` 和 `package.test.mjs` 覆盖。

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Restore Better Sidebar's native collapse control when dsh-tauri's global left-sidebar hide rule matches its accessible label; scope the compatibility override to the Better Sidebar toggle cluster and keep cleanup lifecycle-owned.
+- Add browser cascade/interaction regression coverage for stylesheet order, narrow/desktop layouts, labels, and cleanup.
+
 ## 0.4.2
 
 - Add bounded compatibility with DSH Core `0.1.3-alpha.1` while retaining the `0.1.1-rc.2` and `0.1.2` compatibility lines.

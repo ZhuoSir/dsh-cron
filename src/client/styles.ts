@@ -58,6 +58,18 @@ export const styles = {
 } as const
 
 export const css = `
+/* Better Sidebar 0.18 / dsh-tauri 0.6.7 compatibility (#16).
+   Desktop hides its duplicate LEFT collapse control by a global aria-label
+   selector with !important, accidentally hiding the RIGHT control too.
+   Restore only the matching native Better Sidebar button. The extra ancestry
+   beats that rule in either load order; no generated classes or state hooks.
+   With either plugin absent this is harmless; Cron's style effect owns cleanup.
+   Remove once Desktop scopes its rule to the left navigation. */
+[data-dsh-panel-host] [data-dsh-toggle-cluster] button[aria-label="Collapse sidebar"],
+[data-dsh-panel-host] [data-dsh-toggle-cluster] button[aria-label="收起侧边栏"] {
+  display: flex !important;
+}
+
 /* Local semantic tokens: current public DSH theme variables first, then
    color-scheme-aware system colors when a host omits one. All three roots are
    included because the trigger, drawer and toast stack live in separate Slots. */

@@ -75,6 +75,9 @@ importers:
       '@deepseek-ai/dsh-web':
         specifier: 0.1.1-rc.2
         version: 0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-llm@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-attachment@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-brand@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-brand@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-timeout@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1))))
+      '@playwright/test':
+        specifier: ^1.62.1
+        version: 1.62.1
       '@types/react':
         specifier: ~18.3.1
         version: 18.3.31
@@ -101,6 +104,26 @@ importers:
         version: 0.3.1
 
 packages:
+
+  '@playwright/test@1.62.1':
+    resolution: {integrity: sha1-aOGq9uSA4ZI5Nt7mxm+uGSHTplo=}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  playwright-core@1.62.1:
+    resolution: {integrity: sha1-Eg9noZGBv9GDxg+pA8DZkzC1Z4U=}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  playwright@1.62.1:
+    resolution: {integrity: sha1-hEe2dV6K7IWjy3IHyCPj7S/GZwA=}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  fsevents@2.3.2:
+    resolution: {integrity: sha1-ilJveLj99GI7cJ4Ll1xSwkwC/Ro=}
+    engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
+    os: [darwin]
 
   '@asamuzakjp/css-color@6.0.7':
     resolution: {integrity: sha1-j59nRS5mNpMJSavgR91VOxMnaTk=}
@@ -1462,6 +1485,21 @@ packages:
         optional: true
 
 snapshots:
+
+  '@playwright/test@1.62.1':
+    dependencies:
+      playwright: 1.62.1
+
+  playwright-core@1.62.1: {}
+
+  playwright@1.62.1:
+    dependencies:
+      playwright-core: 1.62.1
+    optionalDependencies:
+      fsevents: 2.3.2
+
+  fsevents@2.3.2:
+    optional: true
 
   '@asamuzakjp/css-color@6.0.7':
     dependencies:
